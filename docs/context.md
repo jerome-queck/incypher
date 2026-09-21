@@ -95,13 +95,15 @@ outside explicit validation images.
 - Initial independent PR3 review found missing `is_practice` drift validation, an
   overbroad crash catch, duplicated shell-status policy, non-durable in-flight progress,
   and missing integrated async/quiet acceptance coverage. A Standards re-review then
-  identified the client-constructor AST seam and duplicated state upsert. Final runtime
-  head `9a36ea6` resolves all findings and passes 300 macOS tests with 25 expected
+  identified the client-constructor AST seam and duplicated state upsert. CI then exposed
+  host-global `RLIMIT_NPROC` behavior under a busy non-root runner; the shared 64-PID
+  admission budget remains while that ineffective arena-root limit is omitted. Final
+  runtime head `c36b22f` resolves all findings and passes 300 macOS tests with 25 expected
   platform skips. Exact AMD64 image
-  `sha256:d8e5e8f3f22a469ac95ab5c5f78086dde860cc64403ef3cd6c73ab84ad9147bf`
-  is 284,031,695 bytes; checker 6/0/2 expected warnings, all eight official AST guards,
-  imports and clean Day-2 config passed. Sixty-seven focused Linux tests passed with
-  ResourceWarnings fatal. Independent re-review remains required before merge.
+  `sha256:9381bb113e12df5224455f9b905426c88ef039803bb8e8aaa2dca49da7820052`
+  is 284,031,687 bytes; checker 6/0/2 expected warnings, all eight official AST guards,
+  imports and clean Day-2 config passed. Sixty-seven focused Linux tests passed as a
+  non-root user with ResourceWarnings fatal. Independent re-review remains required.
 
 ## Next work, in order
 
