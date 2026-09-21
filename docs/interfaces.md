@@ -53,7 +53,9 @@ duplicate candidates within one solve. `correct` is acceptance; `already_solved`
 the harness's terminal success convention without proving this candidate was accepted.
 The normal loop has durable model-cost reservation/settlement and a separate bounded
 runtime-state database for challenge outcomes, finite ranking backoff, scoped command
-fingerprints and sanitized summaries. It has no durable candidate reconciliation.
+fingerprints and sanitized summaries. Accepted model turns and new tool observations
+checkpoint scheduler progress before final/crash classification. It has no durable
+candidate reconciliation.
 
 ## Limits and change coordination
 

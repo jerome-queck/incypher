@@ -27,7 +27,7 @@ class ArenaSelectionTests(unittest.TestCase):
         ]
         attempted = []
         official = ModuleType("main")
-        official.is_practice = lambda c: "Practice" in c["category"]
+        official.is_practice = lambda ch: "Practice" in ch["category"]
         solver = ModuleType("synthetic_solver")
 
         def build_prompt(ch, cdir, filenames, conn):
@@ -82,7 +82,7 @@ class ArenaSelectionTests(unittest.TestCase):
 
     def test_changed_trusted_solver_hook_fails_before_harness_runs(self):
         official = ModuleType("main")
-        official.is_practice = lambda challenge: False
+        official.is_practice = lambda ch: False
         official.main = lambda: self.fail("changed harness must not run")
         official.solve_challenge = lambda prompt: None
         with patch.dict(sys.modules, {"main": official}):
@@ -100,7 +100,7 @@ class ArenaSelectionTests(unittest.TestCase):
         ]
         delegated_ids, detail_ids, results = [], [], []
         official = ModuleType("main")
-        official.is_practice = lambda challenge: False
+        official.is_practice = lambda ch: False
         solver = ModuleType("ranking_solver")
         solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
         solver.run_bash = lambda cmd: "unused"

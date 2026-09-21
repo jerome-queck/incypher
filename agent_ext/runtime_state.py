@@ -477,6 +477,61 @@ class RuntimeState:
             scope, outcome, progress_total=progress, now=now
         )
 
+    def record_challenge_progress(
+        self, challenge_id: int, progress_delta: int = 1, now: float | None = None
+    ) -> int:
+        """Durably advance scheduler progress without closing an attempt slice."""
+        _challenge_id(challenge_id)
+        if type(progress_delta) is not int or not 0 < progress_delta <= 1_000_000:
+            raise ValueError("progress_delta must be a bounded positive integer")
+        scope = self._rank_scopes.get(challenge_id)
+        if scope is None:
+            raise RuntimeStateError("challenge was not present in the trusted brief list")
+        instant = time.time() if now is None else float(now)
+        if not math.isfinite(instant):
+            raise ValueError("now must be finite")
+        try:
+            with closing(self._connect()) as connection:
+                self._begin(connection)
+                row = connection.execute(
+                    "SELECT * FROM challenge_state WHERE scope_key = ?", (scope.key,)
+                ).fetchone()
+                valid = row is not None and self._valid_state_row(row, scope)
+                progress = min(
+                    (row["progress"] if valid else 0) + progress_delta,
+                    1_000_000,
+                )
+                values = (
+                    row["attempts"], row["failure_streak"], row["last_outcome"],
+                    row["solved"], row["backoff_until"], row["last_attempt_at"],
+                ) if valid else (0, 0, AttemptOutcome.UNSOLVED.value, 0, 0.0, 0.0)
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO challenge_state(
+                        scope_key, challenge_id, material_hash, challenge_kind,
+                        instance_hash, attempts, progress, failure_streak,
+                        last_outcome, solved, backoff_until, last_attempt_at, updated_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        scope.key, scope.challenge_id, scope.material_hash, scope.kind.value,
+                        scope.instance_hash, values[0], progress, values[1], values[2],
+                        values[3], values[4], values[5], instant,
+                    ),
+                )
+                connection.execute(
+                    """DELETE FROM challenge_state WHERE scope_key NOT IN
+                       (SELECT scope_key FROM challenge_state
+                        ORDER BY updated_at DESC, scope_key DESC LIMIT ?)""",
+                    (_MAX_CHALLENGES,),
+                )
+                self._commit(connection, "checkpoint_progress")
+                return progress
+        except RuntimeStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("checkpoint_progress failed") from exc
+
     def checkpoint_outcome(
         self,
         scope: Scope,

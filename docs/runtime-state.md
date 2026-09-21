@@ -17,6 +17,9 @@ connections, credentials and candidate flags are not persisted.
   the unchanged numeric challenge ID. Failed slices receive finite 1s then 2s backoff.
 - Build `brief.scope` once a challenge is admitted. `checkpoint_outcome()` atomically
   records its bounded progress and classified `AttemptOutcome` after each final slice.
+- `record_challenge_progress()` durably advances a ranked challenge after each accepted
+  model turn or new tool observation without incrementing attempts or starting backoff.
+  Final and crash checkpoints preserve the greatest already-durable progress value.
 - Call `command_seen(scope, raw_command)` before dispatch. After execution,
   `record_command()` stores only scoped command/output fingerprints and a sanitized
   summary. A `False` return means another writer already recorded the exact command.

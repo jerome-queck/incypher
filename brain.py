@@ -17,6 +17,7 @@ from decimal import Decimal, InvalidOperation
 import requests
 
 from agent_ext.adapters import LLMConfig
+from agent_ext.managed_shell import quiet_shell_failure
 from agent_ext.model_gateway import (
     BudgetLedger,
     GatewayError,
@@ -436,6 +437,9 @@ class Brain:
             if assistant_turn is None:
                 return {"solved": False, "steps": steps,
                         "error": "malformed model message"}
+            record_model_progress = getattr(self.run_bash, "record_model_progress", None)
+            if callable(record_model_progress):
+                record_model_progress()
             messages.append(assistant_turn)
 
             if not tool_calls:
@@ -508,20 +512,7 @@ class Brain:
                         projected.startswith(("duplicate:", "error:"))
                         or not projected
                         or projected.endswith("(no output)")
-                        or (
-                            "\n" not in projected
-                            and projected.startswith((
-                                "[shell status=timeout ",
-                                "[shell status=cancelled ",
-                                "[shell status=output_limit ",
-                                "[shell status=cost_exceeds_capacity ",
-                                "[shell status=queue_timeout ",
-                                "[shell status=queue_full ",
-                                "[shell status=confinement_unavailable ",
-                                "[shell status=execution_error ",
-                                "[shell status=cleanup_failed ",
-                            ))
-                        )
+                        or quiet_shell_failure(projected)
                     )
                     if quiet:
                         turn_quiet = True

@@ -130,6 +130,21 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertEqual(outcome.brief.kind, ChallengeKind.DYNAMIC)
         self.assertEqual(outcome.brief.instance_hash, "pending")
 
+    def test_progress_checkpoint_does_not_close_attempt_or_add_backoff(self):
+        brief = {"id": 5, "points": 250, "type": "standard", "solved": False}
+        self.store.rank_briefs([brief], now=10)
+        self.assertEqual(self.store.record_challenge_progress(5, now=10), 1)
+        self.assertEqual(self.store.record_challenge_progress(5, 2, now=11), 3)
+        ranked = self.store.rank_briefs([brief], now=11)[0]
+        self.assertIs(ranked, brief)
+        typed = self.store.rank(
+            [ChallengeBrief(5, 250, ChallengeKind.STATIC,
+                            self.store._brief_adapter(brief).material_hash)], now=11
+        )[0]
+        self.assertEqual(typed.progress, 3)
+        self.assertEqual(typed.attempts, 0)
+        self.assertTrue(typed.eligible)
+
     def test_restart_and_concurrent_readers(self):
         self.store.record_observation(self.static, ObservationKind.TOOL, "durable")
         restarted = RuntimeState(self.path)

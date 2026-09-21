@@ -26,7 +26,7 @@ class ValidationIdTests(unittest.TestCase):
     def test_delegates_to_official_main_with_one_selected_id(self):
         called = []
         official_main = ModuleType("main")
-        official_main.is_practice = lambda challenge: True
+        official_main.is_practice = lambda ch: True
         official_main.main = lambda: called.append(True) or 0
         solver = ModuleType("validation_solver")
         solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
@@ -62,5 +62,5 @@ class ValidationIdTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertEqual(validation_main.os.environ["ONLY_IDS"], "94")
-            self.assertFalse(official_main.is_practice({"category": "(Practice)"}))
+            self.assertTrue(official_main.is_practice({"category": "(Practice)"}))
             self.assertEqual(called, [True])

@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import sys
@@ -7,6 +8,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 import arena_main
+import brain
 
 
 class _FakeManagedShell:
@@ -16,15 +18,44 @@ class _FakeManagedShell:
     def __init__(self, scope_ref, deadline_monotonic, **kwargs):
         self.scope_ref = scope_ref
         self.commands = []
+        self.events = []
+        self.jobs = {}
         self.closed = False
         self.__class__.instances.append(self)
 
     def __call__(self, command):
         self.commands.append(command)
+        self.events.append(("run", command))
         return self.response
+
+    def start(self, command):
+        handle = "job-%d" % (len(self.jobs) + 1)
+        self.commands.append(command)
+        self.events.append(("start", command))
+        self.jobs[handle] = command
+        return handle
+
+    def poll(self, handle, wait_seconds=0):
+        self.events.append(("poll", handle, wait_seconds))
+        self.jobs.pop(handle, None)
+        return self.response
+
+    def cancel(self, handle):
+        self.events.append(("cancel", handle))
+        self.jobs.pop(handle, None)
+        return "[shell status=cancelled exit=-9 elapsed=0.001s truncated=false]"
 
     def close(self):
         self.closed = True
+
+
+class _ScriptedBrain(brain.Brain):
+    def __init__(self, replies, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._replies = iter(replies)
+
+    def _chat(self, messages):
+        return next(self._replies)
 
 
 class CoordinatorRecoveryTests(unittest.TestCase):
@@ -42,7 +73,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         solver.run_bash = lambda cmd: "original shell"
         solve_challenge.__module__ = module_name
         official.solve_challenge = solve_challenge
-        official.is_practice = lambda challenge: False
+        official.is_practice = lambda ch: False
 
         class Client:
             def __init__(self, base, token):
@@ -152,6 +183,8 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             events.append(("solve", ch["id"]))
             if crash:
                 crash = False
+                solver.build_prompt(ch, material_directory, [], None)
+                solver.run_bash("evidence before crash")
                 raise RuntimeError("synthetic crash")
             return {
                 "solved": False,
@@ -183,24 +216,139 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         official.CTFdClient.challenge = observed_challenge
 
         with tempfile.TemporaryDirectory() as directory:
+            material_directory = directory
+            state_path = os.path.join(directory, "runtime.sqlite3")
             with (
                 patch.dict(sys.modules, {
                     "main": official,
                     "crash_recovery_solver": solver,
                 }),
                 patch.dict(os.environ, {
-                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "RUNTIME_STATE_PATH": state_path,
                 }, clear=True),
                 patch("agent_ext.runtime_state.time.time", return_value=100.0),
+                patch("arena_main.ManagedShell", _FakeManagedShell),
             ):
                 self.assertEqual(arena_main.main(), 0)
                 self.assertEqual(events, [("detail", 1), ("solve", 1)])
                 self.assertEqual(returned[0]["error"], "RuntimeError: attempt crashed")
+                connection = sqlite3.connect(state_path)
+                try:
+                    progress = connection.execute(
+                        "SELECT progress FROM challenge_state WHERE challenge_id = 1"
+                    ).fetchone()[0]
+                finally:
+                    connection.close()
+                self.assertGreater(progress, 0)
 
                 events.clear()
                 self.assertEqual(arena_main.main(), 0)
 
         self.assertEqual(events, [("detail", 2), ("solve", 2)])
+
+    def test_async_shell_flows_through_harness_and_persists_evidence(self):
+        challenge = {
+            "id": 11, "name": "async", "category": "misc", "type": "standard",
+            "value": 100, "files": [],
+        }
+
+        def solve_challenge(client, ch, max_steps):
+            prompt = solver.build_prompt(ch, material_directory, [], None)
+            replies = [
+                {"content": "", "tool_calls": [{"id": "start", "function": {
+                    "name": "start_bash",
+                    "arguments": json.dumps({"command": "long inspection"}),
+                }}]},
+                {"content": "", "tool_calls": [{"id": "poll", "function": {
+                    "name": "poll_bash",
+                    "arguments": json.dumps({"handle": "job-1", "wait_seconds": 1}),
+                }}]},
+                {"content": "done"},
+            ]
+            return _ScriptedBrain(
+                replies, solver.run_bash, lambda flag: {"status": "incorrect"},
+                max_steps=max_steps, verbose=False,
+            ).solve(prompt)
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "async_recovery_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            material_directory = directory
+            state_path = os.path.join(directory, "runtime.sqlite3")
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "async_recovery_solver": solver,
+                }),
+                patch.dict(os.environ, {"RUNTIME_STATE_PATH": state_path}, clear=True),
+                patch("arena_main.ManagedShell", _FakeManagedShell),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+            connection = sqlite3.connect(state_path)
+            try:
+                observation_count = connection.execute(
+                    "SELECT COUNT(*) FROM observations WHERE challenge_id = 11"
+                ).fetchone()[0]
+                progress = connection.execute(
+                    "SELECT progress FROM challenge_state WHERE challenge_id = 11"
+                ).fetchone()[0]
+            finally:
+                connection.close()
+
+        self.assertEqual(observation_count, 1)
+        self.assertGreaterEqual(progress, 4)
+        self.assertEqual(_FakeManagedShell.instances[0].events, [
+            ("start", "long inspection"), ("poll", "job-1", 1),
+        ])
+        self.assertTrue(_FakeManagedShell.instances[0].closed)
+
+    def test_quiet_stall_is_bounded_and_durable_through_harness(self):
+        challenge = {
+            "id": 12, "name": "quiet", "category": "misc", "type": "standard",
+            "value": 100, "files": [],
+        }
+        results = []
+
+        def solve_challenge(client, ch, max_steps):
+            prompt = solver.build_prompt(ch, material_directory, [], None)
+            replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+                "name": "run_bash",
+                "arguments": json.dumps({"command": "same inspection"}),
+            }}]} for index in range(4)]
+            result = _ScriptedBrain(
+                replies, solver.run_bash, lambda flag: {"status": "incorrect"},
+                max_steps=6, verbose=False,
+            ).solve(prompt)
+            results.append(result)
+            return result
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "quiet_recovery_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            material_directory = directory
+            state_path = os.path.join(directory, "runtime.sqlite3")
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "quiet_recovery_solver": solver,
+                }),
+                patch.dict(os.environ, {"RUNTIME_STATE_PATH": state_path}, clear=True),
+                patch("arena_main.ManagedShell", _FakeManagedShell),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+            connection = sqlite3.connect(state_path)
+            try:
+                outcome, progress = connection.execute(
+                    "SELECT last_outcome, progress FROM challenge_state "
+                    "WHERE challenge_id = 12"
+                ).fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(results[0]["error"], "quiet stall: no new tool evidence")
+        self.assertEqual(_FakeManagedShell.instances[0].commands, ["same inspection"])
+        self.assertEqual(outcome, "unsolved")
+        self.assertGreaterEqual(progress, 5)
 
     def test_shell_timeout_is_durably_classified(self):
         challenge = {

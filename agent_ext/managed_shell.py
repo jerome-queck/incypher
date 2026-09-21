@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import selectors
 import signal
 import subprocess
@@ -18,6 +19,27 @@ from .resources import Admission, AdmissionError, Capacity, Cost
 _OUTPUT_BYTES = 12_000
 _MAX_HANDLES = 2
 _HEAVY_MARKERS = ("gdb", "binwalk", "nmap", "objdump", "radare", "python", "find ")
+RESOURCE_STATUSES = frozenset({
+    "output_limit", "cost_exceeds_capacity", "queue_timeout", "queue_full",
+    "confinement_unavailable", "execution_error", "cleanup_failed",
+})
+_QUIET_FAILURE_STATUSES = RESOURCE_STATUSES | {"timeout", "cancelled"}
+_PROJECTION_HEADER = re.compile(r"^\[shell status=([a-z_]+)[^]]*](?:\n(.*))?$", re.S)
+
+
+def parse_shell_projection(output: str) -> tuple[str | None, bool]:
+    """Return a managed status and whether the projection contains payload evidence."""
+    if not isinstance(output, str):
+        return None, False
+    match = _PROJECTION_HEADER.fullmatch(output.strip())
+    if match is None:
+        return None, bool(output.strip())
+    return match.group(1), bool((match.group(2) or "").strip())
+
+
+def quiet_shell_failure(output: str) -> bool:
+    status, has_payload = parse_shell_projection(output)
+    return status in _QUIET_FAILURE_STATUSES and not has_payload
 
 
 def _environment() -> dict[str, str]:

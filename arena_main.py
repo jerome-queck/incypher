@@ -8,15 +8,14 @@ import hashlib
 import importlib
 import inspect
 import os
-import re
 import textwrap
 import time
 from collections.abc import Mapping
 
-from agent_ext.managed_shell import ManagedShell
+from agent_ext.managed_shell import ManagedShell, RESOURCE_STATUSES, parse_shell_projection
 from agent_ext.resources import Admission, Capacity
 from agent_ext.runtime_context import bind_prepared_material, current_attempt, trusted_attempt
-from agent_ext.runtime_state import AttemptOutcome, RuntimeState
+from agent_ext.runtime_state import AttemptOutcome, RuntimeState, RuntimeStateError
 
 
 _MAIN_MARKERS = (
@@ -30,7 +29,6 @@ _MAIN_MARKERS = (
     "results.append(res)",
     'open(f"{WORK}/results.json", "w")',
 )
-_STATUS = re.compile(r"^\[shell status=([a-z_]+)")
 _OFFICIAL_AST = {
     "main": "d28a60bcc5f8168c42d0bec40728d161d648323418aadd965c2b9310c5cb460b",
     "solve": "a20e9ee542b68283728f9a8800d9384b2eb44da1a931a97b99551ee7fd562ac1",
@@ -38,6 +36,7 @@ _OFFICIAL_AST = {
     "shell": "5e127a5d448b71c6f65ca6d938175a0bcc0c8bdf74313b3498cea6fb92d3ea0b",
     "catalogue": "40a1220cf274ee54b0c3aa77a7504fae77256d496c778fd43c646c3815f74ba2",
     "detail": "a04d71af3e0fa8eab901da59d5a009fc75937e899dd9ff749e2b7b539fa4f6fe",
+    "is_practice": "d6e6b7c08dbe14b5094e557787c911c792e488ba163fbb11f10f36772371aa05",
 }
 
 
@@ -118,8 +117,8 @@ class _RankedClient:
 
 
 def _shell_summary(output: str) -> str:
-    match = _STATUS.match(output or "")
-    return "bounded shell outcome: " + (match.group(1) if match else "rejected")
+    status, _ = parse_shell_projection(output)
+    return "bounded shell outcome: " + (status or "rejected")
 
 
 class _StatefulShell:
@@ -135,6 +134,7 @@ class _StatefulShell:
         self._context = None
         self._commands: dict[str, str] = {}
         self._failure: AttemptOutcome | None = None
+        self._progress = 0
 
     def _get_shell(self) -> ManagedShell:
         if self._shell is None:
@@ -153,17 +153,13 @@ class _StatefulShell:
         return command in self._commands.values() or self._state.lookup(context, command)
 
     def _record(self, command: str, output: str) -> None:
-        match = _STATUS.match(output or "")
-        status = match.group(1) if match else ""
+        status, _ = parse_shell_projection(output)
         classified = None
         if status == "timeout":
             classified = AttemptOutcome.TIMEOUT
         elif status == "cancelled":
             classified = AttemptOutcome.CANCELLED
-        elif status in {
-            "output_limit", "cost_exceeds_capacity", "queue_timeout", "queue_full",
-            "confinement_unavailable", "execution_error",
-        }:
+        elif status in RESOURCE_STATUSES:
             classified = AttemptOutcome.RESOURCE
         priority = {
             None: 0,
@@ -174,13 +170,21 @@ class _StatefulShell:
         if priority[classified] > priority[self._failure]:
             self._failure = classified
         context = self._context or current_attempt(required=True)
-        self._state.record(
+        recorded = self._state.record(
             context,
             command,
             output,
             _shell_summary(output),
             progress=1,
         )
+        if recorded:
+            self._state.record_challenge_progress(context.challenge_id)
+            self._progress += 1
+
+    def record_model_progress(self) -> None:
+        context = current_attempt(required=True)
+        self._state.record_challenge_progress(context.challenge_id)
+        self._progress += 1
 
     def __call__(self, command: str) -> str:
         if self._duplicate(command):
@@ -231,6 +235,10 @@ class _StatefulShell:
     def failure_outcome(self) -> AttemptOutcome | None:
         return self._failure
 
+    @property
+    def progress(self) -> int:
+        return self._progress
+
 
 def _failure_class(result: Mapping, shell: _StatefulShell) -> AttemptOutcome:
     error = str(result.get("error", "")).lower()
@@ -267,8 +275,8 @@ def main():
     import main as official_main
 
     _require_main_contract(official_main)
-    if not callable(getattr(official_main, "is_practice", None)):
-        raise RuntimeError("Official practice-selection hook changed; inspect base contract")
+    inherited_is_practice = getattr(official_main, "is_practice", None)
+    _require_signature(inherited_is_practice, ("ch",), "practice-selection")
     inherited_solve = getattr(official_main, "solve_challenge", None)
     _require_signature(inherited_solve, ("client", "ch", "max_steps"), "solve-challenge")
     inherited_client = getattr(official_main, "CTFdClient", None)
@@ -293,6 +301,9 @@ def main():
     inherited_run_bash = getattr(solver_module, "run_bash", None)
     _require_signature(inherited_run_bash, ("cmd",), "shell")
     if getattr(official_main, "__file__", None):
+        _require_ast(
+            inherited_is_practice, _OFFICIAL_AST["is_practice"], "practice-selection"
+        )
         _require_ast(inherited_solve, _OFFICIAL_AST["solve"], "solve-challenge")
         _require_ast(inherited_build_prompt, _OFFICIAL_AST["prompt"], "prompt-construction")
         _require_ast(inherited_run_bash, _OFFICIAL_AST["shell"], "shell")
@@ -328,8 +339,13 @@ def main():
             solver_module.run_bash = shell
             try:
                 result = inherited_solve(client, ch, max_steps)
-            except Exception as exc:
-                state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
+            except (
+                RuntimeStateError, OSError, ValueError, KeyError, TypeError,
+                RuntimeError, TimeoutError,
+            ) as exc:
+                state.record_challenge_outcome(
+                    int(cid), False, shell.progress, AttemptOutcome.CRASH
+                )
                 state.checkpoint()
                 return {
                     "id": int(cid),
@@ -352,11 +368,11 @@ def main():
             state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
             raise RuntimeError("Official solve result changed; inspect base contract")
         solved = result.get("solved") is True
-        progress = min(
+        progress = max(shell.progress, min(
             1_000_000,
             max(0, int(result.get("model_calls", 0)))
             + max(0, int(result.get("tool_calls", 0))),
-        )
+        ))
         state.record_challenge_outcome(
             int(cid), solved, progress,
             AttemptOutcome.SOLVED if solved else _failure_class(result, shell),
@@ -371,6 +387,7 @@ def main():
     try:
         return official_main.main()
     finally:
+        official_main.is_practice = inherited_is_practice
         official_main.CTFdClient = inherited_client
         official_main.solve_challenge = inherited_solve
         solver_module.build_prompt = inherited_build_prompt
