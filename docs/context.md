@@ -58,9 +58,8 @@ and is not the registry image. Do not conflate the unpushed candidate with push 
   `sha256:44065c5107ddcbc132932e32563b04c7d10bf60cb07116c2b4ec9e3b2fd0166e`,
   began scoring at 03:10 SGT and earned eleven fresh
   arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
-  persistent solving and queue rotation. The updated usage/status pages now explicitly
-  make Day 1 development re-uploads free; the 100-point charge starts on Day 2 after
-  the first scored run begins. At 04:15 the explicitly requested
+  persistent solving and queue rotation. See [release rules](competition-rules.md#submission-and-runtime-requirements)
+  for the current re-upload policy. At 04:15 the explicitly requested
   replacement push #21 registered immediately; the registry confirms exact Day-1 digest
   `sha256:c7c21321634911e86d20d4b8eb2d1c6d2a314d88d2ad30524e08c209425e76d4`.
   At 04:30 the public row remained `running`, 11/15 and penalty 0. It does not expose
@@ -70,8 +69,8 @@ and is not the registry image. Do not conflate the unpushed candidate with push 
   At the 04:35 cycle the board remained RUNNING at 11/15, 2,250 VALID, rank 2 and
   penalty 0. At 04:40 the row remains RUNNING at 11/15 and penalty 0. It registered
   push count 22 but still exposed no active digest or new solve; actual pickup remains
-  unproven. Current usage says replacement of a running container happens after
-  collecting its written results at a cycle, while the status legend conflicts.
+  unproven. The conflicting public pickup descriptions are recorded in
+  [competition rules](competition-rules.md#submission-and-runtime-requirements).
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -217,8 +216,8 @@ holds detailed cost, experiment and provenance records. Current priorities:
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
    controls active. Make a new image only after a bounded, measured capability change;
-   Day 1 re-uploads are free, but do not interpret registration as pickup. Day 2
-   re-uploads can cost 100 points. Preserve negative local held-out results.
+   use the [release rules](competition-rules.md#submission-and-runtime-requirements)
+   for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
    fresh base/contract drift, and follow [release gates](setup.md#day-2-release). Do not
    treat structural checks or local solves as competition acceptance.
