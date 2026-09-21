@@ -42,7 +42,8 @@ per-slice inherited `MAX_STEPS` and dollar governor, and adds durable adaptive s
 PR #18 merged bounded five-minute public crowd signals, fail-closed Day-2 model
 discovery, unresolved-dispatch shutdown and scoped submission reconciliation. PR #19
 merged the measured 16-model/20-tool packaged slice; its Day-1 image is push #22.
-The next local candidate widens only the packaged per-slice horizon to 24/28; its
+PR #21 merged the packaged 24-model/28-tool slice; its Day-1 image is push #23.
+The larger slice was tested locally: its
 fresh synthetic P2 trial B30 passed in 5/5 calls/tools, below the previous 16/20
 ceilings, so the larger bound's benefit remains unproven until live or comparative
 evidence. Clean AMD64 Day-2 image
@@ -50,7 +51,11 @@ evidence. Clean AMD64 Day-2 image
 passed checker 6/0/2, 369 non-entrypoint tests inside the non-root read-only
 2CPU/2GiB/256PID sandbox with ResourceWarnings fatal, and the 375-test host suite
 with 25 expected platform skips; it has no Day-1 credential/validation selector
-and is not the registry image. Do not conflate the unpushed candidate with push #22.
+and is not the registry image. A new, unpushed local Brain candidate reserves its
+final model turn for submission or typed checkpoint when a finding callback exists.
+One short fresh diagnostic saved a finding and another did not; full-slice B33
+passed a fresh reversing case in 10/10 model/tool calls. This is local continuity
+and regression evidence, not a cause proven for the live scoring plateau.
 
 ## Evidence and release identity
 
@@ -71,6 +76,12 @@ and is not the registry image. Do not conflate the unpushed candidate with push 
   push count 22 but still exposed no active digest or new solve; actual pickup remains
   unproven. The conflicting public pickup descriptions are recorded in
   [competition rules](competition-rules.md#submission-and-runtime-requirements).
+  PR #21 merged as `6d56f93`; the checked Day-1 replacement
+  `sha256:ec016de958d729e65f6eda7e8af49c8bf206405182f2981052d16e797f3cbf60`
+  was pushed at 04:49:24, and remote registry `latest` independently matched.
+  At 04:55 the board registered push #23 and remained RUNNING, 11/15,
+  2,250 VALID, rank 2, penalty 0, last own solve 03:25. Pickup still cannot be
+  tied to an image from that aggregate view.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -210,12 +221,13 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #22 without manual solving.** Read public status/scores through upcoming
+1. **Monitor push #23 without manual solving.** Read public status/scores through upcoming
    cycles; distinguish registration, active-image pickup, VALID solves and penalties.
    Its registry digest is proven; the board does not identify the active digest. Do not
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
-   controls active. Make a new image only after a bounded, measured capability change;
+   controls active. Evaluate the final-turn checkpoint candidate on fresh scoped work,
+   review it before release, and make a new image only after a bounded capability change;
    use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
