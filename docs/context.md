@@ -51,12 +51,19 @@ raw provider exception text leaking into results. The optional bridge retains it
   from official base `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
   The checker passed 6/6 checks with the expected root/no-token warnings; Day-1 secrets
   and validation selector were absent. This is a local rollback identity, not a release.
-- Frozen gateway candidate `c03f0bb` produced local AMD64 Day-2 image
+- Merged gateway PR #15 produced local AMD64 Day-2 image
   `sha256:0bc8f980859e3367dc78e5c977016bf2059bf5fc53c03c004bb60cbc0143a074`.
   Its checker passed 6/6 with the same expected warnings; an in-image Python 3.12 import
   of `ModelGateway` and `BudgetLedger` passed. The candidate suite passed 235 tests on
   macOS with 19 Linux-only skips. A later documentation-only evidence commit does not
-  alter any path copied by the Dockerfile.
+  alter any path copied by the Dockerfile. Merge commit `8627839` is the PR2 base.
+- Runtime-integration candidate `58eaae8` produced local AMD64 Day-2 image
+  `sha256:aec2048b24b21427f749f35c4383270318bb2f817e199a4e16f1f413fb2176f2`.
+  The checker passed 6/6 with the two expected warnings, and the macOS suite passed
+  259 tests with 19 Linux-only skips. A preregistered, non-submitting Luna/high fixture
+  exercised discovery, two model turns, one tool result, preserved provider reasoning
+  metadata, one exact in-process submission and settled USD 0.0002678 with no unresolved
+  reservation. This is local synthetic evidence, not practice or arena acceptance.
 - Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
   Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
   macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,
@@ -77,9 +84,9 @@ unchanged. A 21 Sep ~21:29 SGT public-board refresh still showed 5/15, VALID/SCO
 The ordered technical gates below remain the starting baseline; the build session
 may resequence them using the brief and measured evidence.
 
-1. **Validate the integrated model path.** Run a non-submitting exact-image Luna/high
-   fixture, then one readiness-gated fresh-material practice validation. Confirm ledger,
-   context bounds, trusted scope and inherited cleanup/results behavior.
+1. **Validate the integrated model path.** The exact-image non-submitting Luna/high
+   fixture passes. Next use held-out local fixtures and one readiness-gated fresh-material
+   practice validation; confirm inherited cleanup/results behavior before release.
 2. **Prove solving.** Use one explicitly selected practice challenge via `scripts/arena.py`
    or local Codex practice. Record accepted outcome, elapsed time and model/tool usage
    privately; report sanitized counts. Local/manual solves do not prove arena VALID.
@@ -94,12 +101,12 @@ may resequence them using the brief and measured evidence.
    Read runtime-injected model configuration; neither a Sol/Astra pin nor a local
    subscription is a substitute. Record the pushed digest and board outcome separately.
 
-Known limits to investigate: fixed 180s model/120s command calls can exceed proposed
-attempt deadlines; shell output is captured before the 12,000-character model excerpt;
-normal Brain has no persisted dedupe across restarts, dollar budget accounting, transient
-model retry or watchdog. Its `temperature`/`max_tokens` request compatibility with the
-unannounced Day-2 endpoint remains unproven. Broad callback exception/cancellation
-behavior remains the inherited harness's responsibility until inspected and tested.
+Known limits to investigate: shell execution is synchronous and output is captured before
+the 12,000-character model excerpt; normal Brain has no persistent work queue, durable
+progress memory, resource scheduler, transient model retry or quiet-stall watchdog.
+Restart-safe cost reservations exist, but restart-safe challenge dedupe/recovery does not.
+Day-2 request compatibility remains provider-dependent. Broad callback exception and
+cancellation behavior remains the inherited harness's responsibility.
 
 ## Context management
 
