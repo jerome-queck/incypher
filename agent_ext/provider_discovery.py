@@ -68,6 +68,14 @@ class DiscoveryResult:
     source: str
     provenance: str
     canonical_model: str | None = None
+    max_completion_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        ceiling = self.max_completion_tokens
+        if ceiling is not None and (
+            type(ceiling) is not int or not 1 <= ceiling <= 1_000_000
+        ):
+            raise ValueError("completion ceiling must be a bounded positive integer")
 
 
 _OPAQUE = DiscoveryResult(ProviderCapabilities(), None, "opaque", "unknown", None)
@@ -178,6 +186,16 @@ def _parse_capabilities(model: Mapping[str, Any]) -> ProviderCapabilities:
     return ProviderCapabilities(frozenset(parameters) & _GATEWAY_PARAMETERS)
 
 
+def _parse_completion_ceiling(
+    model: Mapping[str, Any], capabilities: ProviderCapabilities
+) -> int | None:
+    if not capabilities.optional_parameters & {"max_tokens", "max_completion_tokens"}:
+        return None
+    provider = model.get("top_provider")
+    value = provider.get("max_completion_tokens") if isinstance(provider, Mapping) else None
+    return value if type(value) is int and 1 <= value <= 1_000_000 else None
+
+
 def _parse_pricing(model: Mapping[str, Any]) -> ModelPricing | None:
     pricing = model.get("pricing")
     if not isinstance(pricing, Mapping):
@@ -245,12 +263,14 @@ def discover_provider(
                 canonical = exact.get("canonical_slug")
                 if not isinstance(canonical, str) or not canonical or len(canonical) > _MAX_TEXT:
                     canonical = None
+                capabilities = _parse_capabilities(exact)
                 result = DiscoveryResult(
-                    _parse_capabilities(exact),
+                    capabilities,
                     _parse_pricing(exact),
                     "openrouter_catalogue",
                     "openrouter_catalogue",
                     canonical,
+                    _parse_completion_ceiling(exact, capabilities),
                 )
     if cache is not None and result.provenance != "unknown":
         cache.put(identity.model, result)

@@ -73,6 +73,23 @@ passed checker 6/0/2, carries only five intended model/budget keys and no
 selector. Independent Standards/Spec reviews and CI passed on PR #23 at
 `89dbe69`, merged as `de7c201`. The matching Day-1 image is push #25;
 this remains scheduling plausibility, not evidence of another arena solve.
+On that exact clean runtime, B36b used a two-call unsolved reversing slice
+with five safe records, then a fresh admitted slice solved in eight more calls;
+B37 crypto and B38 network also passed fresh one-shot local cases. All three
+lanes had one correct/zero wrong submission and zero unresolved spend, but
+none exercised the four still-unaccepted live challenges. A newer unpushed
+adaptive completion-cap candidate allows 8,192 instead of 4,096 tokens only
+for an exact, priced, ceiling-verified OpenRouter model while projected
+spend remains behind target. Its 382-test host suite (25 expected skips),
+exact clean Day-2 image
+`sha256:8351f6f47dff7174603ce68a550b606dd2c941d39a5ba51f3791af19760ca53c`
+checker 6/0/2 and 376 restricted-container tests pass. A content-free local
+Luna probe sent one real 8,192/high request and settled USD 0.0000436; this
+proves compatibility/accounting, not better solve quality. Review and release
+remain open. The matching Day-1 image
+`sha256:254f0e4dfcaf6b67fd31ced8f4983695409f55a2bda23634d9a21401674c31da`
+passed checker 6/0/2 and contains only the five intended model/budget key
+names, with no validation selector. The clean Day-2 image has neither.
 
 ## Evidence and release identity
 
@@ -114,6 +131,8 @@ this remains scheduling plausibility, not evidence of another arena solve.
   that digest. The board registered push #25, RUNNING at 11/15, 2,250 VALID,
   penalty 0. The 05:15 cycle still showed RUNNING with no new own solve or
   active-image identity. Do not infer pickup from push registration alone.
+  Through the 05:30 cycle push #25 remained RUNNING at 11/15, 2,250 VALID,
+  rank 2 and penalty 0. No new own event or active digest is exposed.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -258,8 +277,8 @@ holds detailed cost, experiment and provenance records. Current priorities:
    Its registry digest is proven; the board does not identify the active digest. Do not
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
-   controls active. Evaluate new generic capabilities on fresh scoped work and make a
-   replacement image only after a bounded measured change;
+   controls active. Independently review/check the new capability-verified adaptive
+   completion candidate and consider a Day-1 replacement after its gates;
    use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect

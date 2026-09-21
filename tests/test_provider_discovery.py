@@ -36,6 +36,7 @@ def fixture(model="openai/test-model", parameters=None, pricing=None):
             "pricing": pricing
             if pricing is not None
             else {"prompt": "0.000001", "completion": "0.000003"},
+            "top_provider": {"max_completion_tokens": 128000},
         }]
     }
 
@@ -100,6 +101,7 @@ class ProviderDiscoveryTests(unittest.TestCase):
         self.assertEqual(result.source, "openrouter_catalogue")
         self.assertEqual(result.provenance, "openrouter_catalogue")
         self.assertEqual(result.canonical_model, "openai/test-model-20260901")
+        self.assertEqual(result.max_completion_tokens, 128000)
         self.assertEqual(calls[0][0], "https://openrouter.ai/api/v1/models")
         self.assertLessEqual(calls[0][1], 5)
         self.assertLessEqual(calls[0][2], 2 * 1024 * 1024)
@@ -148,6 +150,18 @@ class ProviderDiscoveryTests(unittest.TestCase):
         document["data"][0]["canonical_slug"] = ["openai/test-model"]
         result = discover_provider(identity(), lambda *_: document)
         self.assertIsNone(result.canonical_model)
+
+    def test_unverified_completion_ceiling_cannot_raise_request_capacity(self):
+        for value in (None, True, "8192", 0, -1, 1_000_001):
+            with self.subTest(value=value):
+                document = fixture()
+                document["data"][0]["top_provider"] = {"max_completion_tokens": value}
+                result = discover_provider(identity(), lambda *_: document)
+                self.assertIsNone(result.max_completion_tokens)
+        document = fixture(parameters=["reasoning", "tools"])
+        self.assertIsNone(
+            discover_provider(identity(), lambda *_: document).max_completion_tokens
+        )
 
     def test_malformed_pricing_does_not_invent_cost(self):
         malformed = (

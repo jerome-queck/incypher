@@ -13,7 +13,7 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -31,6 +31,7 @@ from agent_ext.model_gateway import (
 from agent_ext.playbooks import playbook_for
 from agent_ext.provider_discovery import (
     DiscoveryCache,
+    DiscoveryResult,
     discover_provider,
     discover_served_model,
     estimate_max_cost,
@@ -329,6 +330,44 @@ def _budget_pace(
     )
 
 
+def _budget_request(
+    snapshot,
+    discovery: DiscoveryResult,
+    prompt_tokens: int,
+    opaque_reserve: Decimal,
+    *,
+    now: float | None = None,
+) -> tuple[BudgetPace, Decimal | None, Decimal]:
+    """Select a bounded completion cap and reserve its actual worst-case price."""
+    def priced(cap: int) -> tuple[Decimal | None, Decimal]:
+        estimate = estimate_max_cost(
+            discovery.pricing, prompt_tokens=prompt_tokens, completion_tokens=cap
+        )
+        maximum = (
+            max(Decimal("0.05"), estimate * Decimal("1.5"))
+            if estimate is not None else opaque_reserve
+        )
+        return estimate, maximum
+
+    estimate, maximum = priced(4096)
+    pace = _budget_pace(snapshot, projected_cost=maximum, now=now)
+    if (
+        pace.posture != "behind-target"
+        or discovery.provenance != "openrouter_catalogue"
+        or estimate is None
+        or discovery.max_completion_tokens is None
+        or discovery.max_completion_tokens < 8192
+    ):
+        return pace, estimate, maximum
+    expanded_estimate, expanded_maximum = priced(8192)
+    if expanded_estimate is None:
+        return pace, estimate, maximum
+    expanded_pace = _budget_pace(snapshot, projected_cost=expanded_maximum, now=now)
+    if expanded_pace.posture != "behind-target":
+        return pace, estimate, maximum
+    return replace(expanded_pace, max_tokens=8192), expanded_estimate, expanded_maximum
+
+
 def _observed_identity_matches(configured: str, observed: str, discovery) -> bool:
     if observed == configured:
         return True
@@ -534,17 +573,10 @@ class Brain:
         )
         bounded = _bounded_messages(messages)
         prompt_tokens = max(1, len(json.dumps(bounded, ensure_ascii=False).encode("utf-8")) // 4)
-        estimated = estimate_max_cost(
-            self._discovery.pricing,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=4096,
+        assert self._opaque_reserve is not None
+        pace, estimated, maximum = _budget_request(
+            snapshot, self._discovery, prompt_tokens, self._opaque_reserve
         )
-        if estimated is not None:
-            maximum = max(Decimal("0.05"), estimated * Decimal("1.5"))
-        else:
-            assert self._opaque_reserve is not None
-            maximum = self._opaque_reserve
-        pace = _budget_pace(snapshot, projected_cost=maximum)
         reasoning_effort = (
             pace.reasoning_effort
             if supported & {"reasoning", "reasoning_effort"}

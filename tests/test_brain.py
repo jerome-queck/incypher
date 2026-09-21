@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import time
@@ -12,7 +13,7 @@ from unittest.mock import Mock, patch
 
 import brain
 import agent_ext.runtime_context as runtime_context
-from agent_ext.provider_discovery import DiscoveryResult
+from agent_ext.provider_discovery import DiscoveryResult, ModelPricing
 from agent_ext.runtime_context import trusted_attempt
 from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
@@ -252,6 +253,65 @@ class BrainTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", request)
         self.assertEqual(request["max_tokens"], 4096)
 
+    def test_verified_behind_pace_request_uses_extended_completion_cap(self):
+        class Response:
+            def __init__(self, payload):
+                self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.posts = []
+
+            def get(self, url, timeout, stream, headers=None):
+                return Response({"data": [{
+                    "id": "openai/test-extended",
+                    "supported_parameters": ["max_completion_tokens", "reasoning", "tools"],
+                    "top_provider": {"max_completion_tokens": 128000},
+                    "pricing": {"prompt": "0.000001", "completion": "0.0001"},
+                }]})
+
+            def post(self, endpoint, headers, data, timeout, stream):
+                self.posts.append(json.loads(data))
+                return Response({
+                    "model": "openai/test-extended",
+                    "choices": [{"message": {"role": "assistant", "content": "done"}}],
+                    "usage": {"cost": "0.01"},
+                })
+
+        with tempfile.TemporaryDirectory() as directory:
+            budget_path = os.path.join(directory, "budget.sqlite3")
+            with patch.dict(os.environ, {
+                "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+                "LLM_MODEL": "openai/test-extended", "LLM_API_KEY": "synthetic",
+                "MODEL_BUDGET_PATH": budget_path, "MODEL_BUDGET_USD": "20",
+                "MODEL_SPEND_PACING": "adaptive",
+                "MODEL_BUDGET_WINDOW_SECONDS": "23400",
+            }, clear=True):
+                agent = brain.Brain(Mock(), Mock(), verbose=False)
+                agent.s = Session()
+                agent._ensure_ledger()
+                with sqlite3.connect(budget_path) as connection:
+                    connection.execute(
+                        "UPDATE model_budget_meta SET value = ? WHERE key = 'started_at'",
+                        (str(time.time() - 3900),),
+                    )
+                agent._chat([{"role": "user", "content": "test"}])
+                self.assertEqual(
+                    agent._ledger.snapshot().measured_cost, brain.Decimal("0.01")
+                )
+        self.assertEqual(agent.s.posts[0]["max_completion_tokens"], 8192)
+        self.assertEqual(agent.s.posts[0]["reasoning"], {"effort": "high"})
+
     def test_image_default_discovers_served_tool_model_and_capabilities(self):
         class Response:
             def __init__(self, payload):
@@ -306,6 +366,7 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(agent.s.gets[0][1]["Authorization"], "Bearer secret")
         self.assertEqual(agent.s.posts[0]["model"], "served/tool-model")
         self.assertEqual(agent.s.posts[0]["reasoning_effort"], "high")
+        self.assertEqual(agent.s.posts[0]["max_completion_tokens"], 4096)
 
     def test_image_default_never_dispatches_an_unadvertised_model(self):
         session = Mock()
@@ -443,6 +504,52 @@ class BrainTests(unittest.TestCase):
         ))
         self.assertEqual({behind.max_tokens, on_target.max_tokens, ahead.max_tokens}, {4096})
         self.assertEqual(on_target.observed_per_minute, brain.Decimal("0.2"))
+
+    def test_verified_openrouter_behind_pace_prices_extended_completion(self):
+        discovery = DiscoveryResult(
+            brain.ProviderCapabilities(frozenset({"max_completion_tokens", "reasoning"})),
+            ModelPricing(brain.Decimal("0.000001"), brain.Decimal("0.0001")),
+            "openrouter_catalogue", "openrouter_catalogue", None, 128000,
+        )
+        snapshot = SimpleNamespace(
+            limit=brain.Decimal("20"), committed_cost=brain.Decimal("1"),
+            started_at=1000.0,
+        )
+        environment = {"MODEL_SPEND_PACING": "adaptive",
+                       "MODEL_BUDGET_WINDOW_SECONDS": "23400"}
+        with patch.dict(os.environ, environment, clear=True):
+            pace, estimate, reservation = brain._budget_request(
+                snapshot, discovery, 100, brain.Decimal("1"), now=4900.0
+            )
+            self.assertEqual((pace.posture, pace.reasoning_effort, pace.max_tokens),
+                             ("behind-target", "high", 8192))
+            self.assertEqual(estimate, brain.Decimal("0.8193"))
+            self.assertEqual(reservation, brain.Decimal("1.22895"))
+
+            for altered in (
+                replace(discovery, max_completion_tokens=None),
+                replace(discovery, pricing=None),
+                replace(discovery, provenance="compatible_catalogue"),
+            ):
+                self.assertEqual(
+                    brain._budget_request(snapshot, altered, 100, brain.Decimal("1"),
+                                          now=4900.0)[0].max_tokens, 4096
+                )
+            self.assertEqual(
+                brain._budget_request(SimpleNamespace(**{**snapshot.__dict__,
+                    "committed_cost": brain.Decimal("1.8")}),
+                                      discovery, 100, brain.Decimal("1"), now=4900.0
+                                      )[0].max_tokens, 4096
+            )
+            self.assertEqual(
+                brain._budget_request(snapshot, discovery, 100, brain.Decimal("1"),
+                                      now=1050.0)[0].max_tokens, 4096
+            )
+        with patch.dict(os.environ, {"MODEL_SPEND_PACING": "fixed_high"}, clear=True):
+            self.assertEqual(
+                brain._budget_request(snapshot, discovery, 100, brain.Decimal("1"),
+                                      now=4900.0)[0].max_tokens, 4096
+            )
 
     def test_budget_pacing_validates_clock_window_and_projected_cost(self):
         snapshot = SimpleNamespace(
