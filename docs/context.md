@@ -66,7 +66,13 @@ raw provider exception text leaking into results. The optional bridge retains it
   reservation. This is local synthetic evidence, not practice or arena acceptance.
   Frozen review of head `02976ca` requested bounded HTTP streaming, prompt-safe trusted
   enums, fixed budget-policy bounds, catalogue-authorized canonical identity, full-or-reject
-  file hashing and integrated lifecycle/fault coverage; the review-fix head is pending.
+  file hashing and integrated lifecycle/fault coverage. Fix head `eb93ec0` passed 269 tests
+  with 19 expected macOS skips and produced checked AMD64 image
+  `sha256:cb07da46ef61f9135bfd7ab32c81dd61736d40c6fa58a0a8991177289adbafc8`
+  (284,214,719 bytes; checker 6/0/2 expected warnings; in-image imports passed).
+  Preregistered B4 on that exact image repeated the Luna/high fixture in 7.145s: two
+  model calls, one tool, one correct in-process submission, USD 0.0002720 measured and
+  zero unresolved. This evidence closes the fix-head pre-review checks, not CTF capability.
 - Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
   Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
   macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,
