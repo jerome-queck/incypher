@@ -299,14 +299,14 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #25 without manual solving.** Read public status/scores through upcoming
+1. **Monitor push #26 without manual solving.** Read public status/scores through upcoming
    cycles; distinguish registration, active-image pickup, VALID solves and penalties.
    Its registry digest is proven; the board does not identify the active digest. Do not
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
-   controls active. Monitor checked push #26 for hard failures and fresh VALID,
-   then test a measurable capability improvement before another replacement;
-   use the [release rules](competition-rules.md#submission-and-runtime-requirements)
+   controls active. Finish review/CI for the checked USD15 successor before a
+   replacement; then test a measurable capability improvement for further images.
+   Use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
    fresh base/contract drift, and follow [release gates](setup.md#day-2-release). Do not
