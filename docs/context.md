@@ -94,10 +94,12 @@ outside explicit validation images.
   This is synthetic capability/plumbing evidence, not practice or arena acceptance.
 - Initial independent PR3 review found missing `is_practice` drift validation, an
   overbroad crash catch, duplicated shell-status policy, non-durable in-flight progress,
-  and missing integrated async/quiet acceptance coverage. Fix runtime head `671cffd`
-  resolves those findings and passes 300 macOS tests with 25 expected platform skips.
-  Exact AMD64 image `sha256:81cb0cbd4e5bd94c61ebf4d649ea3f128ac83b3593bd259f4dc64382189f3c0b`
-  is 284,031,481 bytes; checker 6/0/2 expected warnings, all official AST guards,
+  and missing integrated async/quiet acceptance coverage. A Standards re-review then
+  identified the client-constructor AST seam and duplicated state upsert. Final runtime
+  head `9a36ea6` resolves all findings and passes 300 macOS tests with 25 expected
+  platform skips. Exact AMD64 image
+  `sha256:d8e5e8f3f22a469ac95ab5c5f78086dde860cc64403ef3cd6c73ab84ad9147bf`
+  is 284,031,695 bytes; checker 6/0/2 expected warnings, all eight official AST guards,
   imports and clean Day-2 config passed. Sixty-seven focused Linux tests passed with
   ResourceWarnings fatal. Independent re-review remains required before merge.
 
