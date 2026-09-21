@@ -3,5 +3,6 @@
 !brain.py
 !entrypoint.sh
 !validation_main.py
+!arena_main.py
 !agent_ext/
 !agent_ext/**

@@ -17,6 +17,8 @@ import agent_ext.tools.executor
 import agent_ext.tools.inspection
 import agent_ext.verification
 import brain
+import arena_main
+import validation_main
 assert brain.Brain.__module__ == "brain"
 print("PASS: Brain and all merged agent_ext modules import from image")
 '

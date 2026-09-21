@@ -446,6 +446,10 @@ class BrainAttempt:
             def _chat(self, messages):
                 return execution._model(super()._chat, messages)
 
+            def _invalid_tool_arguments(self, name):
+                execution.failure = Failure(FailureKind.MALFORMED_REQUEST, Operation.TOOL)
+                raise _AttemptStopped("malformed_tool_request")
+
         agent = None
         projection = {"solved": False, "steps": 0}
         try:

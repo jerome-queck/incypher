@@ -4,6 +4,7 @@ COPY agent_ext /opt/agent/agent_ext
 COPY brain.py /opt/agent/brain.py
 COPY entrypoint.sh /opt/agent/entrypoint.sh
 COPY validation_main.py /opt/agent/validation_main.py
+COPY arena_main.py /opt/agent/arena_main.py
 
 ARG INCLUDE_DAY1_LLM=0
 RUN --mount=type=secret,id=day1_llm \

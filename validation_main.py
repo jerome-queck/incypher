@@ -16,16 +16,15 @@ def validation_id(path=VALIDATION_ID_FILE):
 
 
 def main():
-    import main as official_main
+    from arena_main import main as run_arena
 
     challenge_id = validation_id()
     os.environ["ONLY_IDS"] = str(challenge_id)
-    official_main.is_practice = lambda challenge: False
     print(
         f"=== validation mode: challenge {challenge_id} via official harness ===",
         flush=True,
     )
-    return official_main.main()
+    return run_arena()
 
 
 if __name__ == "__main__":

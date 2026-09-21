@@ -1,11 +1,14 @@
-# Day-2 readiness record
+# Historical Day-2 runtime verification
+
+Evidence for merged [PR #3](https://github.com/jerome-queck/incypher/pull/3), not current
+release readiness. Read [context](context.md) and [setup](setup.md) for today's state.
 
 Recorded 21 September 2026 from PR #3's runtime work, rebased onto merged team commit
 `cde9ef48ed955c503c225b0a4d5fcec8245786a2`.
 
 ## Configuration audit
 
-The current normal-selection registry image
+The then-current normal-selection registry image
 `sha256:75fc11358fc236c505026288dea5b3b2f0d2cf07e182a6a9f53db7dff28523e3`
 contains `/opt/agent/.day1-llm.env`. Its entrypoint sources that file unconditionally. A
 value-free sentinel check confirmed that sourcing it replaces a complete runtime
@@ -86,8 +89,7 @@ image configuration itself still contains no `LLM_*` entries.
 
 ## Rollback
 
-No registry state changes in this work. Source rollback is to leave or close this PR; `main`
-remains independently deployable at `cde9ef48ed955c503c225b0a4d5fcec8245786a2`. If a separately approved future deployment
+No registry state changes in this work. At the time of this record, the prior source baseline was `cde9ef48ed955c503c225b0a4d5fcec8245786a2`. If a separately approved future deployment
 needs arena rollback, the captain can retag and push the retained normal-selection image
 `sha256:75fc11358fc236c505026288dea5b3b2f0d2cf07e182a6a9f53db7dff28523e3`.
 That restores the prior arena-validated behavior, including its known Day-1 override risk, so it
