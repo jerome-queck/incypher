@@ -51,11 +51,12 @@ raw provider exception text leaking into results. The optional bridge retains it
   from official base `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
   The checker passed 6/6 checks with the expected root/no-token warnings; Day-1 secrets
   and validation selector were absent. This is a local rollback identity, not a release.
-- Frozen gateway candidate `2af0b62` produced local AMD64 Day-2 image
-  `sha256:c79de3b1715436db4ab850a115aacaa343491c10a5fa29d548118cf061b49ab5`.
+- Frozen gateway candidate `c03f0bb` produced local AMD64 Day-2 image
+  `sha256:0bc8f980859e3367dc78e5c977016bf2059bf5fc53c03c004bb60cbc0143a074`.
   Its checker passed 6/6 with the same expected warnings; an in-image Python 3.12 import
-  of `ModelGateway` and `BudgetLedger` passed. The candidate suite passed 234 tests on
-  macOS with 19 Linux-only skips. Review fixes may supersede this identity before merge.
+  of `ModelGateway` and `BudgetLedger` passed. The candidate suite passed 235 tests on
+  macOS with 19 Linux-only skips. A later documentation-only evidence commit does not
+  alter any path copied by the Dockerfile.
 - Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
   Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
   macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,
