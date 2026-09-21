@@ -195,7 +195,6 @@ class ManagedShell:
                 argv = [
                     "/usr/bin/prlimit",
                     f"--as={job.cost.memory_bytes}",
-                    f"--nproc={job.cost.pids}",
                     "--nofile=128",
                     "--core=0",
                     "--",

@@ -45,7 +45,9 @@ at 12 KB and 45s/90s deadlines bounded by the trusted attempt. It offers synchro
 compatibility plus at most two opaque current-attempt handles. Polls wait at most five
 seconds; Brain closes the supervisor on every exit, cancelling and reaping remaining jobs.
 These estimates do not replace aggregate arena cgroups, and root `RLIMIT_NPROC` is not
-claimed as hard PID isolation.
+claimed as hard PID isolation. The shell therefore uses the shared PID admission budget
+instead of host-global `RLIMIT_NPROC`, which counts unrelated same-UID processes on
+non-root shared runners.
 
 The coordinator fingerprints raw commands/output in memory, stores only sanitized status
 summaries, and rejects an exact same-scope replay. Static evidence requires the same material
