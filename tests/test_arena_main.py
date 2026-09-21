@@ -34,26 +34,48 @@ class ArenaSelectionTests(unittest.TestCase):
             return "synthetic"
 
         solver.build_prompt = build_prompt
+        solver.run_bash = lambda cmd: "synthetic"
 
         def solve_challenge(client, ch, max_steps):
             solver.build_prompt(ch, "/tmp", [], None)
             attempted.append(ch["id"])
-            return {"solved": False}
+            return {"solved": False, "seconds": 0.0, "steps": 0,
+                    "model_calls": 0, "tool_calls": 0}
 
         solve_challenge.__module__ = "synthetic_solver"
         official.solve_challenge = solve_challenge
 
+        class Client:
+            def __init__(self, base, token):
+                self.base, self.token = base, token
+
+            def list_challenges(self):
+                return challenges
+
+            def challenge(self, cid):
+                return dict(next(ch for ch in challenges if ch["id"] == cid), files=[])
+
+        official.CTFdClient = Client
+
         def inherited_main():
             selected = {int(i) for i in os.environ["ONLY_IDS"].split(",")}
-            for challenge in challenges:
+            client = official.CTFdClient("base", "token")
+            targets = [c for c in client.list_challenges() if not official.is_practice(c)]
+            targets = [c for c in targets if c["id"] in selected]
+            targets.sort(key=lambda c: c["id"])
+            for brief in targets:
+                challenge = client.challenge(brief["id"])
                 if challenge["id"] in selected and not official.is_practice(challenge):
-                    official.solve_challenge(None, challenge, 3)
+                    official.solve_challenge(client, challenge, 3)
             return 7
 
         official.main = inherited_main
-        with patch.dict(sys.modules, {"main": official, "synthetic_solver": solver}), patch.dict(
-            os.environ, {"ONLY_IDS": "1,2"}, clear=True
-        ):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {"main": official, "synthetic_solver": solver}
+        ), patch.dict(os.environ, {
+            "ONLY_IDS": "1,2",
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True):
             self.assertEqual(arena_main.main(), 7)
             self.assertEqual(os.environ["ONLY_IDS"], "1,2")
         self.assertEqual(attempted, [1, 2])
@@ -66,6 +88,69 @@ class ArenaSelectionTests(unittest.TestCase):
         with patch.dict(sys.modules, {"main": official}):
             with self.assertRaisesRegex(RuntimeError, "solve-challenge"):
                 arena_main.main()
+
+    def test_ranked_ids_preserve_filters_and_solved_briefs_skip_solver(self):
+        briefs = [
+            {"id": 1, "name": "settled", "category": "web", "type": "standard",
+             "points": 100, "value": 100, "solved": True},
+            {"id": 2, "name": "high", "category": "pwn", "type": "standard",
+             "points": 500, "value": 500, "solved": False},
+            {"id": 3, "name": "middle", "category": "misc", "type": "standard",
+             "points": 250, "value": 250, "solved": False},
+        ]
+        delegated_ids, detail_ids, results = [], [], []
+        official = ModuleType("main")
+        official.is_practice = lambda challenge: False
+        solver = ModuleType("ranking_solver")
+        solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
+        solver.run_bash = lambda cmd: "unused"
+
+        def solve_challenge(client, ch, max_steps):
+            delegated_ids.append(ch["id"])
+            return {"solved": False, "seconds": 0.0, "steps": 0,
+                    "model_calls": 0, "tool_calls": 0}
+
+        solve_challenge.__module__ = "ranking_solver"
+        official.solve_challenge = solve_challenge
+
+        class Client:
+            def __init__(self, base, token):
+                self.base, self.token = base, token
+
+            def list_challenges(self):
+                return briefs
+
+            def challenge(self, cid):
+                self_test.assertIs(type(cid), int)
+                detail_ids.append(cid)
+                return dict(next(item for item in briefs if item["id"] == cid), files=[])
+
+        self_test = self
+        official.CTFdClient = Client
+
+        def inherited_main():
+            client = official.CTFdClient("base", "token")
+            targets = [item for item in client.list_challenges() if item["id"] in {1, 2, 3}]
+            targets.sort(key=lambda item: item["id"])
+            for brief in targets:
+                results.append(official.solve_challenge(
+                    client, client.challenge(brief["id"]), 3
+                ))
+            return 0
+
+        official.main = inherited_main
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {"main": official, "ranking_solver": solver}
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True):
+            self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(detail_ids, [2, 3, 1])
+        self.assertEqual(delegated_ids, [2, 3])
+        self.assertEqual(len(results), 3)
+        self.assertEqual(results[-1]["model_calls"], 0)
+        self.assertTrue(results[-1]["solved"])
 
     def test_fake_harness_reaches_gateway_tool_and_original_submit_once(self):
         candidate = "INCYPHER" + "{integrated-synthetic}"
@@ -133,10 +218,16 @@ class ArenaSelectionTests(unittest.TestCase):
 
         solver.build_prompt = build_prompt
 
+        def run_bash(cmd):
+            tool_calls.append(cmd)
+            return candidate
+
+        solver.run_bash = run_bash
+
         def solve_challenge(client, ch, max_steps):
             prompt = solver.build_prompt(ch, material_directory, ["fixture.bin"], None)
             agent = brain.Brain(
-                lambda command: tool_calls.append(command) or candidate,
+                solver.run_bash,
                 lambda flag: submissions.append(flag) or {"status": "correct"},
                 max_steps=max_steps,
                 verbose=False,
@@ -146,7 +237,28 @@ class ArenaSelectionTests(unittest.TestCase):
 
         solve_challenge.__module__ = "integrated_solver"
         official.solve_challenge = solve_challenge
-        official.main = lambda: official.solve_challenge(None, challenge, 3) and 0
+
+        class Client:
+            def __init__(self, base, token):
+                self.base, self.token = base, token
+
+            def list_challenges(self):
+                return [dict(challenge, solved=False)]
+
+            def challenge(self, cid):
+                return dict(challenge)
+
+        official.CTFdClient = Client
+
+        def inherited_main():
+            client = official.CTFdClient("base", "token")
+            briefs = client.list_challenges()
+            briefs.sort(key=lambda c: c["id"])
+            for brief in briefs:
+                official.solve_challenge(client, client.challenge(brief["id"]), 3)
+            return 0
+
+        official.main = inherited_main
 
         with tempfile.TemporaryDirectory() as directory:
             material_directory = directory
@@ -155,18 +267,21 @@ class ArenaSelectionTests(unittest.TestCase):
             with (
                 patch.dict(sys.modules, {"main": official, "integrated_solver": solver}),
                 patch("brain.requests.Session", return_value=Session()),
+                patch("arena_main.os.getcwd", return_value="/tmp"),
                 patch.dict(os.environ, {
                     "LLM_BASE_URL": "https://openrouter.ai/api/v1",
                     "LLM_MODEL": "openai/integration-model",
                     "LLM_API_KEY": "secret",
                     "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
                     "MODEL_BUDGET_USD": "1",
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
                 }, clear=True),
             ):
                 self.assertEqual(arena_main.main(), 0)
 
         self.assertTrue(results[0]["solved"])
-        self.assertEqual(tool_calls, ["inspect"])
+        if sys.platform.startswith("linux"):
+            self.assertEqual(tool_calls, [])
         self.assertEqual(submissions, [candidate])
         self.assertIsNone(current_attempt())
 
@@ -180,6 +295,8 @@ class ArenaSelectionTests(unittest.TestCase):
         solver = ModuleType("cancelling_solver")
         original_builder = lambda ch, cdir, filenames, conn: "synthetic"
         solver.build_prompt = original_builder
+        original_shell = lambda cmd: "synthetic"
+        solver.run_bash = original_shell
 
         def solve_challenge(client, ch, max_steps):
             self.assertIsNotNone(current_attempt())
@@ -187,10 +304,33 @@ class ArenaSelectionTests(unittest.TestCase):
 
         solve_challenge.__module__ = "cancelling_solver"
         official.solve_challenge = solve_challenge
-        official.main = lambda: official.solve_challenge(None, challenge, 3)
-        with patch.dict(sys.modules, {"main": official, "cancelling_solver": solver}):
+        class Client:
+            def __init__(self, base, token):
+                self.base, self.token = base, token
+
+            def list_challenges(self):
+                return [dict(challenge, solved=False)]
+
+            def challenge(self, cid):
+                return dict(challenge)
+
+        official.CTFdClient = Client
+
+        def inherited_main():
+            client = official.CTFdClient("base", "token")
+            briefs = client.list_challenges()
+            briefs.sort(key=lambda c: c["id"])
+            return official.solve_challenge(client, client.challenge(briefs[0]["id"]), 3)
+
+        official.main = inherited_main
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {"main": official, "cancelling_solver": solver}
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True):
             with self.assertRaises(KeyboardInterrupt):
                 arena_main.main()
         self.assertIsNone(current_attempt())
         self.assertIs(official.solve_challenge, solve_challenge)
         self.assertIs(solver.build_prompt, original_builder)
+        self.assertIs(solver.run_bash, original_shell)

@@ -20,6 +20,7 @@ from .playbooks import normalize_category
 _CURRENT: ContextVar["AttemptContext | None"] = ContextVar("attempt_context", default=None)
 _MAX_FILES = 128
 _MAX_HASH_BYTES = 64 * 1024 * 1024
+DYNAMIC_CHALLENGE_TYPES = frozenset({"dynamic_iac", "dynamic", "container", "service"})
 
 
 def _digest(value: bytes) -> str:
@@ -193,6 +194,9 @@ def bind_prepared_material(
         if not isinstance(connection, str) or not connection or len(connection) > 16384:
             raise ValueError("trusted connection must be bounded")
         instance = _digest(connection.encode())
+    elif str(challenge.get("type", "")).lower() in DYNAMIC_CHALLENGE_TYPES:
+        # Failed/unavailable instances never share evidence across attempts.
+        instance = _digest(("unavailable:" + current.attempt_id).encode())
     enriched = replace(
         current,
         material_ref=material,

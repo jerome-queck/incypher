@@ -37,7 +37,7 @@ TOOLS = [
         "description": ("Run a shell command in the solver container and return stdout+stderr. "
                         "Available: curl, wget, nc, nmap, python3 (pwntools, pycryptodome, requests, "
                         "sympy), file, xxd, strings, objdump, gdb, binwalk. Challenge files are in "
-                        "/work/<id>/. Commands time out after 120s."),
+                        "/work/<id>/. Commands are bounded to 45s, or 90s for heavy analysis."),
         "parameters": {"type": "object",
                        "properties": {"command": {"type": "string"}},
                        "required": ["command"]}}},
@@ -47,6 +47,31 @@ TOOLS = [
         "parameters": {"type": "object",
                        "properties": {"flag": {"type": "string"}},
                        "required": ["flag"]}}},
+]
+
+ASYNC_TOOLS = [
+    {"type": "function", "function": {
+        "name": "start_bash",
+        "description": ("Start one bounded shell operation and return an opaque handle. Use this "
+                        "only when useful work can overlap; at most two handles exist."),
+        "parameters": {"type": "object",
+                       "properties": {"command": {"type": "string"}},
+                       "required": ["command"]}}},
+    {"type": "function", "function": {
+        "name": "poll_bash",
+        "description": "Poll one current-attempt shell handle for bounded output or completion.",
+        "parameters": {"type": "object",
+                       "properties": {
+                           "handle": {"type": "string"},
+                           "wait_seconds": {"type": "number", "minimum": 0, "maximum": 5},
+                       },
+                       "required": ["handle"]}}},
+    {"type": "function", "function": {
+        "name": "cancel_bash",
+        "description": "Cancel and reap one current-attempt shell handle.",
+        "parameters": {"type": "object",
+                       "properties": {"handle": {"type": "string"}},
+                       "required": ["handle"]}}},
 ]
 
 SYSTEM = """You autonomously solve one authorized CTF challenge. The trusted scope line,
@@ -76,6 +101,20 @@ def _clip_utf8(value: str, maximum: int) -> str:
     if len(raw) <= maximum:
         return value
     return raw[:maximum].decode("utf-8", errors="ignore") + "\n[truncated]"
+
+
+def _clip_prompt(value: str, maximum: int) -> str:
+    raw = value.encode("utf-8")
+    if len(raw) <= maximum:
+        return value
+    marker = b"\n[middle truncated]\n"
+    available = maximum - len(marker)
+    head = available * 2 // 3
+    return (
+        raw[:head].decode("utf-8", errors="ignore")
+        + marker.decode("ascii")
+        + raw[-(available - head):].decode("utf-8", errors="ignore")
+    )
 
 
 def _bounded_messages(messages):
@@ -222,6 +261,9 @@ class Brain:
         self._ledger = None
         self._opaque_reserve = None
         self._discovery = None
+        self._tools = list(TOOLS)
+        if getattr(run_bash, "supports_async", False) is True:
+            self._tools.extend(ASYNC_TOOLS)
         self.s = requests.Session()
         self.s.headers.update({
             "Content-Type": "application/json",
@@ -304,7 +346,7 @@ class Brain:
             bounded,
             capabilities,
             RequestOptions(max_tokens=4096, reasoning_effort="high"),
-            tools=TOOLS,
+            tools=self._tools,
             tool_choice="auto",
             estimated_cost=estimated,
         )
@@ -340,14 +382,23 @@ class Brain:
         return None
 
     def solve(self, prompt: str) -> dict:
-        result = self._solve(prompt)
-        result.setdefault("model_calls", self.model_calls)
-        if self._ledger is not None:
-            snapshot = self._ledger.snapshot()
-            result.setdefault("model_cost_measured", str(snapshot.measured_cost))
-            result.setdefault("model_cost_estimated", str(snapshot.estimated_cost))
-            result.setdefault("model_cost_unresolved", str(snapshot.unresolved_cost))
-        return result
+        try:
+            result = self._solve(prompt)
+            result.setdefault("model_calls", self.model_calls)
+            result.setdefault("tool_calls", self.tool_calls)
+            if self._ledger is not None:
+                snapshot = self._ledger.snapshot()
+                result.setdefault("model_cost_measured", str(snapshot.measured_cost))
+                result.setdefault("model_cost_estimated", str(snapshot.estimated_cost))
+                result.setdefault("model_cost_unresolved", str(snapshot.unresolved_cost))
+            return result
+        finally:
+            close_shell = getattr(self.run_bash, "close", None)
+            if callable(close_shell):
+                close_shell()
+            close_session = getattr(self.s, "close", None)
+            if callable(close_session):
+                close_session()
 
     def _solve(self, prompt: str) -> dict:
         trusted = current_attempt()
@@ -356,9 +407,11 @@ class Brain:
         category = trusted.category if trusted is not None else "unknown"
         system += "\n\nCategory playbook:\n" + playbook_for(category)
         messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": _clip_utf8(prompt, 24000)}]
+                    {"role": "user", "content": _clip_prompt(prompt, 24000)}]
         submitted = set()
         steps = 0
+        quiet_turns = 0
+        replan_injected = False
 
         for steps in range(1, self.max_steps + 1):
             try:
@@ -396,9 +449,14 @@ class Brain:
                     result = self._submit(flag, steps)
                     if result:
                         return result
+                    break
                 self._log("[step %d] model stopped: %s" % (steps, content[:180]))
                 return {"solved": False, "steps": steps, "final": _redact(content)}
 
+            inject_replan = False
+            turn_quiet = False
+            turn_progress = False
+            submission_this_turn = False
             for tool_call in tool_calls:
                 function = tool_call.get("function", {}) or {}
                 name = function.get("name")
@@ -407,7 +465,11 @@ class Brain:
                 except Exception:  # noqa: BLE001 - malformed tool arguments go back to model
                     arguments = None
 
-                argument_name = {"run_bash": "command", "submit_flag": "flag"}.get(name)
+                argument_name = {
+                    "run_bash": "command", "start_bash": "command",
+                    "poll_bash": "handle", "cancel_bash": "handle",
+                    "submit_flag": "flag",
+                }.get(name)
                 if (not isinstance(arguments, dict)
                         or (argument_name is not None
                             and (not isinstance(arguments.get(argument_name), str)
@@ -417,23 +479,68 @@ class Brain:
                                      "content": "Invalid tool arguments; supply a nonempty string field."})
                     continue
 
-                if name == "run_bash":
+                if name in {"run_bash", "start_bash", "poll_bash", "cancel_bash"}:
                     if self.tool_calls >= self.max_tool_calls:
                         return {"solved": False, "steps": steps,
                                 "error": "tool call budget exhausted"}
                     self.tool_calls += 1
-                    command = arguments.get("command", "")
-                    self._log("[step %d] $ %s" % (steps, command[:160]))
-                    output = self.run_bash(command)
+                    if name == "run_bash":
+                        command = arguments["command"]
+                        self._log("[step %d] $ %s" % (steps, command[:160]))
+                        output = self.run_bash(command)
+                    elif name == "start_bash":
+                        command = arguments["command"]
+                        self._log("[step %d] start $ %s" % (steps, command[:160]))
+                        output = self.run_bash.start(command)
+                    elif name == "poll_bash":
+                        wait = arguments.get("wait_seconds", 0)
+                        if isinstance(wait, bool) or not isinstance(wait, (int, float)):
+                            output = "error:poll wait must be numeric"
+                        else:
+                            output = self.run_bash.poll(arguments["handle"], wait)
+                    else:
+                        output = self.run_bash.cancel(arguments["handle"])
                     messages.append({"role": "tool", "tool_call_id": tool_call.get("id"),
                                      "content": (output or "")[:12000]})
+                    projected = (output or "").strip()
+                    neutral = projected.startswith("running:") or projected.startswith("job-")
+                    quiet = (
+                        projected.startswith(("duplicate:", "error:"))
+                        or not projected
+                        or projected.endswith("(no output)")
+                        or (
+                            "\n" not in projected
+                            and projected.startswith((
+                                "[shell status=timeout ",
+                                "[shell status=cancelled ",
+                                "[shell status=output_limit ",
+                                "[shell status=cost_exceeds_capacity ",
+                                "[shell status=queue_timeout ",
+                                "[shell status=queue_full ",
+                                "[shell status=confinement_unavailable ",
+                                "[shell status=execution_error ",
+                                "[shell status=cleanup_failed ",
+                            ))
+                        )
+                    )
+                    if quiet:
+                        turn_quiet = True
+                    elif not neutral:
+                        turn_progress = True
                 elif name == "submit_flag":
                     flag = arguments.get("flag", "")
+                    if submission_this_turn:
+                        messages.append({
+                            "role": "tool", "tool_call_id": tool_call.get("id"),
+                            "content": "One candidate per evidence turn; gather new evidence.",
+                        })
+                        continue
                     if flag in submitted:
                         messages.append({"role": "tool", "tool_call_id": tool_call.get("id"),
                                          "content": "Candidate already submitted; use new evidence."})
                         continue
                     submitted.add(flag)
+                    submission_this_turn = True
                     result = self._submit(flag, steps)
                     if result:
                         return result
@@ -442,5 +549,22 @@ class Brain:
                 else:
                     messages.append({"role": "tool", "tool_call_id": tool_call.get("id"),
                                      "content": "Unknown tool."})
+
+            if turn_progress:
+                quiet_turns = 0
+            elif turn_quiet:
+                quiet_turns += 1
+            if quiet_turns >= 3:
+                return {"solved": False, "steps": steps,
+                        "error": "quiet stall: no new tool evidence"}
+            if quiet_turns >= 2 and not replan_injected:
+                replan_injected = True
+                inject_replan = True
+            if inject_replan:
+                messages.append({
+                    "role": "user",
+                    "content": ("No new evidence from two tool outcomes. Replan once: "
+                                "choose a materially different bounded experiment."),
+                })
 
         return {"solved": False, "steps": steps, "final": "step budget exhausted"}

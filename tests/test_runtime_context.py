@@ -74,6 +74,15 @@ class RuntimeContextTests(unittest.TestCase):
                 with trusted_attempt(self.challenge):
                     pass
 
+    def test_unavailable_service_uses_attempt_unique_dynamic_generation(self):
+        challenge = dict(self.challenge, type="service")
+        with tempfile.TemporaryDirectory() as directory, trusted_attempt(challenge):
+            first = bind_prepared_material(challenge, directory, [], None)
+        with tempfile.TemporaryDirectory() as directory, trusted_attempt(challenge):
+            second = bind_prepared_material(challenge, directory, [], None)
+        self.assertIsNotNone(first.instance_generation)
+        self.assertNotEqual(first.instance_generation, second.instance_generation)
+
 
 if __name__ == "__main__":
     unittest.main()
