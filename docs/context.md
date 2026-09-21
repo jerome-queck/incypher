@@ -51,7 +51,7 @@ locally but not pushed over the progressing live run.
   arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
   persistent solving and queue rotation. The board now explicitly charges 100 points for
   every re-upload after the first scored run begins, so the working run is not replaced.
-- The local successor passes 365 portable tests with 25 expected skips.
+- The local successor passes 370 portable tests with 25 expected skips.
   Clean AMD64 Day-2 image
   `sha256:be04f8f418c34197e23e5fef017e374f73ed1100f182ea816b16f5bb06ba3b1d`
   is 284,041,157 bytes, passes checker 6/0/2, contains no Day-1 secret/selector, and
@@ -188,7 +188,8 @@ Known limits: shell operations may overlap inside one model conversation, but ch
 lifecycles and inherited passes remain serial, so dynamic capacity stays one. Durable typed
 findings are deliberately conservative and not yet measured on real CTF work. An unresolved
 gateway worker stops the process to avoid overlapping paid effects; submission uncertainty
-defers only its challenge until trusted catalogue reconciliation while the queue continues.
+defers only its exact material/instance scope until trusted catalogue reconciliation while
+the queue continues.
 Day-2 request compatibility remains provider-dependent; dynamic cleanup remains inherited.
 
 ## Context management

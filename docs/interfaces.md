@@ -55,8 +55,9 @@ The normal loop has durable model-cost reservation/settlement and a separate bou
 runtime-state database for challenge outcomes, finite ranking backoff, scoped command
 fingerprints and typed safe findings. Accepted model turns and new tool observations
 checkpoint scheduler progress before final/crash classification. Before callback dispatch,
-the active shell durably stores only a keyed candidate identity. Uncertain effects block
-that challenge until trusted catalogue reconciliation; other challenges continue.
+the active shell durably stores only a scope-keyed candidate identity, then commits a
+separate dispatch-possible marker. Uncertain effects block that exact material/instance
+scope until trusted catalogue reconciliation; other work continues.
 
 ## Limits and change coordination
 

@@ -234,9 +234,6 @@ class _RankedClient:
     def trusted_solved(self, challenge_id: int) -> bool:
         return int(challenge_id) in self._solved
 
-    def trusted_submission_reconciled(self, challenge_id: int) -> bool:
-        return self._state.submission_reconciled(int(challenge_id))
-
     def mark_solved(self, challenge_id: int) -> None:
         self._catalogue.mark_solved(challenge_id)
 
@@ -326,6 +323,14 @@ class _StatefulShell:
 
     def reserve_submission(self, candidate: str) -> bool:
         return self._state.reserve_submission(
+            current_attempt(required=True), candidate
+        )
+
+    def submission_reconciled(self) -> bool:
+        return self._state.submission_reconciled(current_attempt(required=True))
+
+    def mark_submission_dispatch_possible(self, candidate: str) -> bool:
+        return self._state.mark_submission_dispatch_possible(
             current_attempt(required=True), candidate
         )
 
@@ -456,9 +461,14 @@ class _OuterCoordinator:
         self.pass_calls = 0
         self.pass_slices = 0
         self.pass_all_solved = True
+        self.pass_waiting = False
 
     def note_catalogue_solved(self) -> None:
         self.pass_calls += 1
+
+    def note_waiting(self) -> None:
+        self.pass_waiting = True
+        self.pass_all_solved = False
 
     def admit(self, max_steps: int) -> tuple[int | None, str | None]:
         self.pass_calls += 1
@@ -482,6 +492,7 @@ class _OuterCoordinator:
         solved: bool,
         budget_exhausted: bool = False,
         unresolved_dispatch: bool = False,
+        submission_waiting: bool = False,
     ) -> None:
         if time.monotonic() >= self.deadline:
             self.stop_reason = "run deadline"
@@ -489,12 +500,16 @@ class _OuterCoordinator:
             self.stop_reason = "model budget exhausted"
         if unresolved_dispatch:
             self.stop_reason = "unresolved model dispatch"
+        if submission_waiting:
+            self.note_waiting()
         if not solved:
             self.pass_all_solved = False
 
     def should_continue(self) -> bool:
         if self.stop_reason is not None:
             return False
+        if self.pass_waiting:
+            return time.monotonic() + _PASS_RECOVERY_SECONDS < self.deadline
         if self.pass_calls == 0:
             return time.monotonic() + _PASS_RECOVERY_SECONDS < self.deadline
         if self.pass_slices == 0 or self.pass_all_solved:
@@ -585,11 +600,6 @@ def main():
             result = _solved_result(ch)
             state.record_challenge_outcome(int(cid), True, 0, AttemptOutcome.UNSOLVED)
             return result
-        if (
-            isinstance(client, _RankedClient)
-            and not client.trusted_submission_reconciled(cid)
-        ):
-            return _deferred_result(ch, "submission reconciliation")
         allocated_steps, deferred = coordinator.admit(max_steps)
         if deferred is not None:
             return _deferred_result(ch, deferred)
@@ -665,6 +675,10 @@ def main():
             unresolved_dispatch=(
                 str(result.get("error", "")) == "GatewayTimeout: model request failed"
             ),
+            submission_waiting=(
+                str(result.get("error", ""))
+                == "submission unresolved: reconciliation required"
+            ),
         )
         return result
 
@@ -688,7 +702,7 @@ def main():
                 return return_code
             delay = (
                 _PASS_RECOVERY_SECONDS
-                if coordinator.pass_calls == 0
+                if coordinator.pass_calls == 0 or coordinator.pass_waiting
                 else _PASS_COOLDOWN_SECONDS
             )
             time.sleep(delay)

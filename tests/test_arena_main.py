@@ -188,6 +188,15 @@ class ArenaSelectionTests(unittest.TestCase):
         self.assertFalse(coordinator.should_continue())
         self.assertEqual(coordinator.stop_reason, "unresolved model dispatch")
 
+    def test_submission_reconciliation_wait_survives_solved_catalogue_entries(self):
+        coordinator = arena_main._OuterCoordinator()
+        coordinator.note_catalogue_solved()
+        coordinator.note_waiting()
+
+        self.assertEqual(coordinator.pass_slices, 0)
+        self.assertTrue(coordinator.should_continue())
+        self.assertFalse(coordinator.pass_all_solved)
+
     def test_per_slice_budget_exhaustion_is_requeueable_not_provider_uncertainty(self):
         shell = SimpleNamespace(failure_outcome=None)
         for error in ("tool call budget exhausted", "submission budget exhausted"):

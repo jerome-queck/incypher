@@ -82,8 +82,9 @@ fresh local ranking decision without overlapping dynamic lifecycles. The wrapper
 the inherited trusted catalogue at most every five minutes; intervening passes rerank a
 defensive cached copy, and accepted solves update only that cache until the next refresh.
 Temporary catalogue read failures retain the prior trusted snapshot for one full cadence;
-initial or malformed reads fail closed. Submission intent is durably keyed before callback
-dispatch. An uncertain callback defers only that challenge until a trusted catalogue refresh
+initial or malformed reads fail closed. Submission intent is durably keyed to exact
+material/instance scope, then marked dispatch-possible immediately before callback dispatch.
+An uncertain callback defers only that scope until a trusted catalogue refresh
 shows it solved or, after five minutes, still unsolved; no uncertain candidate is blindly
 replayed. At the same cadence, a bounded three-second public
 read of the official score page extracts only its recent-event JSON and overlays exact-name

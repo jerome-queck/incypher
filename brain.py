@@ -389,11 +389,33 @@ class Brain:
             if callable(getattr(type(run_bash), "reserve_submission", None))
             else None
         )
+        self._submission_reconciled = (
+            getattr(run_bash, "submission_reconciled", None)
+            if callable(getattr(type(run_bash), "submission_reconciled", None))
+            else None
+        )
+        self._mark_submission_dispatch_possible = (
+            getattr(run_bash, "mark_submission_dispatch_possible", None)
+            if callable(
+                getattr(type(run_bash), "mark_submission_dispatch_possible", None)
+            )
+            else None
+        )
         self._reconcile_submission = (
             getattr(run_bash, "reconcile_submission", None)
             if callable(getattr(type(run_bash), "reconcile_submission", None))
             else None
         )
+        submission_state_callbacks = (
+            self._reserve_submission,
+            self._submission_reconciled,
+            self._mark_submission_dispatch_possible,
+            self._reconcile_submission,
+        )
+        if any(callback is not None for callback in submission_state_callbacks) and not all(
+            callable(callback) for callback in submission_state_callbacks
+        ):
+            raise ValueError("submission state callbacks must be supplied together")
         self.s = requests.Session()
         self.s.headers.update({
             "Content-Type": "application/json",
@@ -566,6 +588,16 @@ class Brain:
                 "verdict": {"status": "uncertain"},
                 "error": "submission unresolved: reconciliation required",
             }
+        if (
+            callable(self._mark_submission_dispatch_possible)
+            and not self._mark_submission_dispatch_possible(flag)
+        ):
+            return {
+                "solved": False,
+                "steps": step,
+                "verdict": {"status": "uncertain"},
+                "error": "submission unresolved: reconciliation required",
+            }
         self.submissions += 1
         try:
             verdict = self.submit_flag(flag)
@@ -606,6 +638,16 @@ class Brain:
                 close_session()
 
     def _solve(self, prompt: str) -> dict:
+        if (
+            callable(self._submission_reconciled)
+            and not self._submission_reconciled()
+        ):
+            return {
+                "solved": False,
+                "steps": 0,
+                "verdict": {"status": "uncertain"},
+                "error": "submission unresolved: reconciliation required",
+            }
         trusted = current_attempt()
         scope = trusted.public_prompt() if trusted is not None else "Trusted scope unavailable; use only supplied local material."
         system = SYSTEM + "\n\n" + scope

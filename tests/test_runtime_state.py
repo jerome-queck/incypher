@@ -301,17 +301,17 @@ class RuntimeStateTests(unittest.TestCase):
         candidate = "INCYPHER{SUBMISSION_SENTINEL}"
         self.store.rank_briefs([brief], now=10)
         self.assertTrue(self.store.reserve_submission(context, candidate, now=10))
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
         self.assertFalse(self.store.reserve_submission(context, candidate, now=11))
         self.store.reconcile_submission(context, candidate, "uncertain", now=12)
 
-        self.store.rank_briefs([brief], now=13)
-        self.assertFalse(self.store.challenge_eligible(7))
+        self.assertFalse(self.store.submission_reconciled(context))
         self.store.reconcile_submission_catalogue([brief], now=311.999)
-        self.store.rank_briefs([brief], now=312)
-        self.assertFalse(self.store.challenge_eligible(7))
+        self.assertFalse(self.store.submission_reconciled(context))
         self.store.reconcile_submission_catalogue([brief], now=312)
-        self.store.rank_briefs([brief], now=312)
-        self.assertTrue(self.store.challenge_eligible(7))
+        self.assertTrue(self.store.submission_reconciled(context))
 
         self.store.checkpoint()
         payload = b"".join(
@@ -324,9 +324,41 @@ class RuntimeStateTests(unittest.TestCase):
         context = self.finding_context(self.static)
         self.store.rank_briefs([brief], now=10)
         self.assertTrue(self.store.reserve_submission(context, "INCYPHER{safe}", now=10))
+        self.assertTrue(self.store.mark_submission_dispatch_possible(
+            context, "INCYPHER{safe}", now=10.5
+        ))
         self.store.reconcile_submission(context, "INCYPHER{safe}", "incorrect", now=11)
-        self.store.rank_briefs([brief], now=11)
-        self.assertTrue(self.store.challenge_eligible(7))
+        self.assertTrue(self.store.submission_reconciled(context))
+
+    def test_dispatch_marker_survives_restart_and_is_scope_exact(self):
+        context = self.finding_context(self.static)
+        other = self.finding_context(Scope(7, "material-new", ChallengeKind.STATIC))
+        candidate = "INCYPHER{possible-effect}"
+        self.assertTrue(self.store.reserve_submission(context, candidate, now=10))
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+
+        restarted = RuntimeState(self.path)
+        self.assertFalse(restarted.submission_reconciled(context))
+        self.assertTrue(restarted.submission_reconciled(other))
+        self.assertTrue(restarted.reserve_submission(other, candidate, now=12))
+
+    def test_dispatch_marker_commit_failure_preserves_safe_reservation(self):
+        def fail(operation):
+            if operation == "mark_submission_dispatch_possible":
+                raise OSError("fault")
+
+        context = self.finding_context(self.static)
+        candidate = "INCYPHER{marker-not-committed}"
+        store = RuntimeState(self.path, before_commit=fail)
+        self.assertTrue(store.reserve_submission(context, candidate, now=10))
+        with self.assertRaisesRegex(RuntimeStateError, "was not committed"):
+            store.mark_submission_dispatch_possible(context, candidate, now=11)
+
+        restarted = RuntimeState(self.path)
+        self.assertTrue(restarted.submission_reconciled(context))
+        self.assertTrue(restarted.reserve_submission(context, candidate, now=12))
 
     def test_submission_reservation_commit_failure_fails_before_dispatch(self):
         def fail(operation):
@@ -342,7 +374,9 @@ class RuntimeStateTests(unittest.TestCase):
         restarted = RuntimeState(self.path)
         brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
         restarted.rank_briefs([brief], now=11)
-        self.assertTrue(restarted.submission_reconciled(7))
+        self.assertTrue(restarted.submission_reconciled(
+            self.finding_context(self.static)
+        ))
 
     def test_restart_and_concurrent_readers(self):
         self.store.record_observation(self.static, ObservationKind.TOOL, "durable")

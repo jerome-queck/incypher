@@ -85,13 +85,22 @@ class SubmissionShell:
     def __init__(self):
         self.reservations = []
         self.reconciliations = []
+        self.dispatch_marks = []
         self.admit = True
+        self.reconciled = True
 
     def __call__(self, command):
         return "unused"
 
     def reserve_submission(self, candidate):
         self.reservations.append(candidate)
+        return self.admit
+
+    def submission_reconciled(self):
+        return self.reconciled
+
+    def mark_submission_dispatch_possible(self, candidate):
+        self.dispatch_marks.append(candidate)
         return self.admit
 
     def reconcile_submission(self, candidate, status):
@@ -1024,7 +1033,7 @@ class BrainTests(unittest.TestCase):
         first = ScriptedBrain(
             [reply], run_bash=shell, submit_flag=submit, verbose=False
         ).solve("synthetic")
-        shell.admit = False
+        shell.reconciled = False
         second = ScriptedBrain(
             [reply], run_bash=shell, submit_flag=submit, verbose=False
         ).solve("synthetic")
@@ -1034,8 +1043,36 @@ class BrainTests(unittest.TestCase):
             second["error"], "submission unresolved: reconciliation required"
         )
         self.assertEqual(submit.call_count, 1)
-        self.assertEqual(shell.reservations, [candidate, candidate])
+        self.assertEqual(shell.reservations, [candidate])
+        self.assertEqual(shell.dispatch_marks, [candidate])
         self.assertEqual(shell.reconciliations, [(candidate, "uncertain")])
+
+    def test_dispatch_marker_failure_prevents_callback(self):
+        class FailingMarkerShell(SubmissionShell):
+            def mark_submission_dispatch_possible(self, candidate):
+                raise RuntimeError("marker commit failed")
+
+        candidate = "INCYPHER{not-dispatched}"
+        submit = Mock()
+        with self.assertRaisesRegex(RuntimeError, "marker commit failed"):
+            ScriptedBrain(
+                [{"content": candidate}],
+                run_bash=FailingMarkerShell(),
+                submit_flag=submit,
+                verbose=False,
+            ).solve("synthetic")
+        submit.assert_not_called()
+
+    def test_partial_submission_state_callbacks_are_rejected(self):
+        class PartialShell:
+            def __call__(self, command):
+                return "unused"
+
+            def reserve_submission(self, candidate):
+                return True
+
+        with self.assertRaisesRegex(ValueError, "supplied together"):
+            brain.Brain(PartialShell(), Mock(), verbose=False)
 
     def test_malformed_model_messages_return_failure_without_dispatch(self):
         for reply in ([], None, {"content": []}, {"tool_calls": {}},

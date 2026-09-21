@@ -262,7 +262,6 @@ class RuntimeState:
         self._initialise_lock = threading.Lock()
         self._rank_scopes: dict[int, Scope] = {}
         self._rank_eligible: dict[int, bool] = {}
-        self._rank_submission_blocked: set[int] = set()
         self._initialise()
 
     def _connect(self) -> sqlite3.Connection:
@@ -321,11 +320,14 @@ class RuntimeState:
                         value TEXT NOT NULL
                     );
                     CREATE TABLE IF NOT EXISTS runtime_submission_intents (
-                        challenge_id INTEGER PRIMARY KEY,
+                        scope_key TEXT PRIMARY KEY,
+                        challenge_id INTEGER NOT NULL,
                         candidate_fp TEXT NOT NULL,
                         status TEXT NOT NULL,
                         updated_at REAL NOT NULL
                     );
+                    CREATE INDEX IF NOT EXISTS runtime_submission_challenge
+                        ON runtime_submission_intents(challenge_id);
                     """
                 )
                 columns = {
@@ -356,7 +358,7 @@ class RuntimeState:
 
     @staticmethod
     def _submission_fingerprint(
-        connection: sqlite3.Connection, candidate: str
+        connection: sqlite3.Connection, scope: Scope, candidate: str
     ) -> str:
         row = connection.execute(
             "SELECT value FROM runtime_meta WHERE key = 'submission_secret'"
@@ -369,13 +371,19 @@ class RuntimeState:
             )
             secret = bytes.fromhex(value)
             return hmac.new(
-                secret, candidate.encode("utf-8"), hashlib.sha256
+                secret,
+                scope.key.encode("ascii") + b"\x00" + candidate.encode("utf-8"),
+                hashlib.sha256,
             ).hexdigest()
         try:
             secret = bytes.fromhex(row["value"])
         except (TypeError, ValueError):
             raise RuntimeStateError("submission identity is invalid") from None
-        return hmac.new(secret, candidate.encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac.new(
+            secret,
+            scope.key.encode("ascii") + b"\x00" + candidate.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     @staticmethod
     def _rollback(connection: sqlite3.Connection) -> None:
@@ -460,7 +468,6 @@ class RuntimeState:
             raise ValueError("now must be finite")
         keys = [item.scope.key for item in briefs]
         rows: dict[str, sqlite3.Row] = {}
-        unresolved: set[int] = set()
         try:
             with closing(self._connect()) as connection:
                 # Avoid an unbounded SQL expression while retaining one read snapshot.
@@ -474,20 +481,8 @@ class RuntimeState:
                         batch,
                     ):
                         rows[row["scope_key"]] = row
-                if identifiers:
-                    for offset in range(0, len(identifiers), 400):
-                        batch = identifiers[offset : offset + 400]
-                        placeholders = ",".join("?" for _ in batch)
-                        for row in connection.execute(
-                            f"SELECT challenge_id FROM runtime_submission_intents "
-                            f"WHERE status IN ('pending', 'uncertain') "
-                            f"AND challenge_id IN ({placeholders})",
-                            batch,
-                        ):
-                            unresolved.add(row["challenge_id"])
         except sqlite3.Error as exc:
             raise RuntimeStateError("runtime state read failed") from exc
-        self._rank_submission_blocked = unresolved
 
         ranked: list[tuple[tuple[object, ...], RankedChallenge]] = []
         for brief in briefs:
@@ -502,7 +497,7 @@ class RuntimeState:
                 last_attempt = float(row["last_attempt_at"])
                 locally_solved = bool(row["solved"])
             solved = brief.solved or locally_solved
-            eligible = backoff_until <= instant and brief.challenge_id not in unresolved
+            eligible = backoff_until <= instant
             remaining = max(0.0, backoff_until - instant)
             item = RankedChallenge(brief, eligible, attempts, progress, remaining)
             # Saved only for the deterministic sort below.
@@ -582,11 +577,18 @@ class RuntimeState:
             raise RuntimeStateError("challenge was not present in the trusted brief list")
         return self._rank_eligible[challenge_id]
 
-    def submission_reconciled(self, challenge_id: int) -> bool:
-        _challenge_id(challenge_id)
-        if challenge_id not in self._rank_scopes:
-            raise RuntimeStateError("challenge was not present in the trusted brief list")
-        return challenge_id not in self._rank_submission_blocked
+    def submission_reconciled(self, context: object) -> bool:
+        """Return whether this exact prepared material/instance scope may solve."""
+        scope = scope_from_context(context)
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    "SELECT status FROM runtime_submission_intents WHERE scope_key = ?",
+                    (scope.key,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("submission reconciliation read failed") from exc
+        return row is None or row["status"] == "reserved"
 
     def reserve_submission(
         self,
@@ -605,19 +607,19 @@ class RuntimeState:
         try:
             with closing(self._connect()) as connection:
                 self._begin(connection)
-                fingerprint = self._submission_fingerprint(connection, candidate)
+                fingerprint = self._submission_fingerprint(connection, scope, candidate)
                 row = connection.execute(
-                    "SELECT status FROM runtime_submission_intents WHERE challenge_id = ?",
-                    (scope.challenge_id,),
+                    "SELECT status FROM runtime_submission_intents WHERE scope_key = ?",
+                    (scope.key,),
                 ).fetchone()
-                if row is not None and row["status"] in {"pending", "uncertain"}:
+                if row is not None and row["status"] != "reserved":
                     self._rollback(connection)
                     return False
                 connection.execute(
                     """INSERT OR REPLACE INTO runtime_submission_intents(
-                           challenge_id, candidate_fp, status, updated_at
-                       ) VALUES(?, ?, 'pending', ?)""",
-                    (scope.challenge_id, fingerprint, instant),
+                           scope_key, challenge_id, candidate_fp, status, updated_at
+                       ) VALUES(?, ?, ?, 'reserved', ?)""",
+                    (scope.key, scope.challenge_id, fingerprint, instant),
                 )
                 self._commit(connection, "reserve_submission")
                 return True
@@ -625,6 +627,48 @@ class RuntimeState:
             raise
         except sqlite3.Error as exc:
             raise RuntimeStateError("submission reservation failed") from exc
+
+    def mark_submission_dispatch_possible(
+        self,
+        context: object,
+        candidate: str,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        """Commit the effect boundary immediately before the trusted callback."""
+        scope = scope_from_context(context)
+        if not isinstance(candidate, str) or not 1 <= len(candidate) <= 1024:
+            raise ValueError("candidate must be bounded text")
+        instant = time.time() if now is None else float(now)
+        if not math.isfinite(instant):
+            raise ValueError("now must be finite")
+        try:
+            with closing(self._connect()) as connection:
+                self._begin(connection)
+                fingerprint = self._submission_fingerprint(connection, scope, candidate)
+                row = connection.execute(
+                    """SELECT candidate_fp, status FROM runtime_submission_intents
+                       WHERE scope_key = ?""",
+                    (scope.key,),
+                ).fetchone()
+                if row is None or row["candidate_fp"] != fingerprint:
+                    self._rollback(connection)
+                    raise RuntimeStateError("submission intent is unavailable")
+                if row["status"] != "reserved":
+                    self._rollback(connection)
+                    return False
+                connection.execute(
+                    """UPDATE runtime_submission_intents
+                       SET status = 'dispatch_possible', updated_at = ?
+                       WHERE scope_key = ?""",
+                    (instant, scope.key),
+                )
+                self._commit(connection, "mark_submission_dispatch_possible")
+                return True
+        except RuntimeStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("submission dispatch marker failed") from exc
 
     def reconcile_submission(
         self,
@@ -647,25 +691,29 @@ class RuntimeState:
         try:
             with closing(self._connect()) as connection:
                 self._begin(connection)
-                fingerprint = self._submission_fingerprint(connection, candidate)
+                fingerprint = self._submission_fingerprint(connection, scope, candidate)
                 row = connection.execute(
-                    "SELECT candidate_fp FROM runtime_submission_intents WHERE challenge_id = ?",
-                    (scope.challenge_id,),
+                    """SELECT candidate_fp, status FROM runtime_submission_intents
+                       WHERE scope_key = ?""",
+                    (scope.key,),
                 ).fetchone()
                 if row is None or row["candidate_fp"] != fingerprint:
                     self._rollback(connection)
                     raise RuntimeStateError("submission intent is unavailable")
+                if row["status"] not in {"dispatch_possible", "uncertain"}:
+                    self._rollback(connection)
+                    raise RuntimeStateError("submission dispatch was not committed")
                 if status == "uncertain":
                     connection.execute(
                         """UPDATE runtime_submission_intents
                            SET status = 'uncertain', updated_at = ?
-                           WHERE challenge_id = ?""",
-                        (instant, scope.challenge_id),
+                           WHERE scope_key = ?""",
+                        (instant, scope.key),
                     )
                 else:
                     connection.execute(
-                        "DELETE FROM runtime_submission_intents WHERE challenge_id = ?",
-                        (scope.challenge_id,),
+                        "DELETE FROM runtime_submission_intents WHERE scope_key = ?",
+                        (scope.key,),
                     )
                 self._commit(connection, "reconcile_submission")
         except RuntimeStateError:
@@ -689,8 +737,9 @@ class RuntimeState:
             with closing(self._connect()) as connection:
                 self._begin(connection)
                 for row in connection.execute(
-                    "SELECT challenge_id, updated_at FROM runtime_submission_intents "
-                    "WHERE status IN ('pending', 'uncertain')"
+                    "SELECT scope_key, challenge_id, updated_at "
+                    "FROM runtime_submission_intents "
+                    "WHERE status IN ('dispatch_possible', 'uncertain')"
                 ):
                     challenge_id = row["challenge_id"]
                     if challenge_id not in solved:
@@ -700,8 +749,8 @@ class RuntimeState:
                         >= _SUBMISSION_RECONCILE_SECONDS
                     ):
                         connection.execute(
-                            "DELETE FROM runtime_submission_intents WHERE challenge_id = ?",
-                            (challenge_id,),
+                            "DELETE FROM runtime_submission_intents WHERE scope_key = ?",
+                            (row["scope_key"],),
                         )
                 self._commit(connection, "reconcile_submission_catalogue")
         except RuntimeStateError:

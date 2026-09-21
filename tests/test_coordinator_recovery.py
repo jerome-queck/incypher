@@ -779,6 +779,12 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
                 }, clear=True),
+                patch.object(
+                    arena_main._OuterCoordinator,
+                    "should_continue",
+                    side_effect=(True, False),
+                ),
+                patch("arena_main.time.sleep"),
             ):
                 self.assertEqual(arena_main.main(), 0)
 
