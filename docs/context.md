@@ -37,10 +37,10 @@ outside explicit validation images.
 PR4 candidate adds strict typed safe findings and bounded serial same-run revisits: four
 slices per challenge, 60 slices, 150 model calls, six hours, two-second cooldown, and global
 stop on provider/submission uncertainty. Its first held-out image passed RSA but exhausted
-the baked 6/10-turn limits on network/reversing without submissions. The current repair
-uses the inherited runtime `MAX_STEPS` directly (1–150), exposes dollar/tool controls to
-the local CLI, and tells the model its remaining slice budget. Reset-set practice remains
-parked until review, exact-image checks and all three fresh held-out lanes pass.
+the baked 6/10-turn limits on network/reversing without submissions. The repaired candidate
+uses inherited runtime `MAX_STEPS` directly (1–150), exposes dollar/tool controls to the
+local CLI, tells the model its remaining slice budget, and adds bounded generic aligned
+known-plaintext network guidance. Reset-set practice remains parked until final review/merge.
 
 ## Evidence and release identity
 
@@ -63,6 +63,13 @@ parked until review, exact-image checks and all three fresh held-out lanes pass.
   1/3: RSA passed; network used all 6 model calls and reversing all 10 model/12 tool calls,
   both without submission or provider/dollar fault. Those consumed cases remain failures;
   fresh cases are required after the bounded runtime-budget repair.
+- Final PR4 candidate head `0b1c541` passes 325 portable tests with 25 expected skips.
+  Exact AMD64 Day-2 image `sha256:8037235c5f3ef870b9c5427da69c7539e419408573b5977e1bf3c2bcbfa83cf3`
+  is 284,036,961 bytes and passes checker 6/0/2, all eight AST guards, clean configuration,
+  imports and 134 focused non-root Linux tests with ResourceWarnings fatal. Fresh exact-image
+  held-out cases pass RSA (4 calls/3 tools), network (5/4 under a 12/16 planning ceiling),
+  and reversing (6/5), each with one correct/zero wrong submission and zero unresolved spend.
+  This is local synthetic capability evidence, not practice or arena acceptance.
 - `.venv` is installed locally. The ignored mode-0600 `.env` is populated on this machine
   with Team 63 platform configuration and the Day-1 provider triplet migrated from the
   prior private files. `doctor` reports every required field set, registry login succeeds,
