@@ -272,11 +272,11 @@ def _assistant_turn(message: dict, content: str, tool_calls: list) -> dict | Non
 
 class Brain:
     def __init__(self, run_bash, submit_flag, max_steps=40, verbose=True):
+        if type(max_steps) is not int or not 1 <= max_steps <= 150:
+            raise ValueError("max_steps must be an integer from 1 through 150")
         self.run_bash = run_bash
         self.submit_flag = submit_flag
-        trusted = current_attempt()
-        point_cap = 10 if trusted is None or trusted.points > 250 else (6 if trusted.points > 100 else 4)
-        self.max_steps = min(max_steps, point_cap) if trusted is not None else max_steps
+        self.max_steps = max_steps
         self.max_submissions = int(os.environ.get("MAX_SUBMISSIONS", "3"))
         self.max_tool_calls = int(os.environ.get("MAX_TOOL_CALLS", "12"))
         self.submissions = 0
@@ -447,6 +447,21 @@ class Brain:
         replan_injected = False
 
         for steps in range(1, self.max_steps + 1):
+            remaining_tools = max(0, self.max_tool_calls - self.tool_calls)
+            budget_notice = (
+                f"Slice budget: model turn {steps}/{self.max_steps}; "
+                f"{remaining_tools} shell/checkpoint calls remain. "
+                "Use the smallest decisive next action."
+            )
+            if steps == self.max_steps:
+                budget_notice += (
+                    " Final model turn: submit only a verified candidate; otherwise use any "
+                    "remaining call to checkpoint the best reusable finding or next step. "
+                    "Do not begin broad new analysis."
+                )
+            elif remaining_tools <= 2:
+                budget_notice += " Preserve one call for a checkpoint if the slice stays unsolved."
+            messages.append({"role": "user", "content": budget_notice})
             try:
                 message = self._chat(messages)
             except Exception as exc:  # noqa: BLE001 - failure is part of the result contract

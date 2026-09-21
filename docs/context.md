@@ -17,7 +17,7 @@ were merged. No open PR contained the requested general practice-selection chang
 | --- | --- | --- |
 | `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; PR4 multipass candidate under review | Serial inherited passes only; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
-| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, point-based call caps, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
+| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, runtime `MAX_STEPS` slice cap, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
 | `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, high reasoning when supported and durable conservative ledger; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
@@ -36,8 +36,11 @@ evidence turn, classifies tool/crash outcomes durably and skips trusted solved b
 outside explicit validation images.
 PR4 candidate adds strict typed safe findings and bounded serial same-run revisits: four
 slices per challenge, 60 slices, 150 model calls, six hours, two-second cooldown, and global
-stop on provider/submission uncertainty. Reset-set practice remains parked until review,
-exact-image checks and all three fresh held-out lanes pass.
+stop on provider/submission uncertainty. Its first held-out image passed RSA but exhausted
+the baked 6/10-turn limits on network/reversing without submissions. The current repair
+uses the inherited runtime `MAX_STEPS` directly (1–150), exposes dollar/tool controls to
+the local CLI, and tells the model its remaining slice budget. Reset-set practice remains
+parked until review, exact-image checks and all three fresh held-out lanes pass.
 
 ## Evidence and release identity
 
@@ -55,6 +58,11 @@ exact-image checks and all three fresh held-out lanes pass.
   B7 solved a fresh exact-image fixture for USD 0.00173741 but used four calls against its
   preregistered three-call cap, so capability remained red. No reset-set practice challenge,
   platform submission, registry release, dynamic instance or organiser restart occurred.
+- Initial PR4 head `c8294b7` passed independent Standards/Spec review, 322 portable tests
+  with 25 skips and exact-image structural/Linux checks. Its first held-out battery was
+  1/3: RSA passed; network used all 6 model calls and reversing all 10 model/12 tool calls,
+  both without submission or provider/dollar fault. Those consumed cases remain failures;
+  fresh cases are required after the bounded runtime-budget repair.
 - `.venv` is installed locally. The ignored mode-0600 `.env` is populated on this machine
   with Team 63 platform configuration and the Day-1 provider triplet migrated from the
   prior private files. `doctor` reports every required field set, registry login succeeds,

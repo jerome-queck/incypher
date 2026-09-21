@@ -35,7 +35,9 @@ class ArenaCommandTests(unittest.TestCase):
         self.assertNotIn('synthetic-secret', ' '.join(args))
         self.assertNotIn('UNRELATED_SECRET', args)
         for expected in ('ONLY_IDS=94', '--read-only', '2g', '256', 'ALL',
-                         'no-new-privileges', 'CTF_TOKEN', 'LLM_API_KEY'):
+                         'no-new-privileges', 'CTF_TOKEN', 'LLM_API_KEY',
+                         'MAX_STEPS', 'MAX_TOOL_CALLS', 'MODEL_BUDGET_USD',
+                         'MODEL_CALL_RESERVE_USD'):
             self.assertIn(expected, args)
 
     def test_missing_model_key_fails_before_docker(self):

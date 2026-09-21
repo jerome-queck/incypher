@@ -89,14 +89,38 @@ class BrainTests(unittest.TestCase):
         self.assertIn("TAIL-CONNECTION", clipped)
         self.assertIn("[middle truncated]", clipped)
 
-    def test_trusted_points_bound_model_steps(self):
-        challenge = {
-            "id": 1, "name": "small", "category": "crypto", "type": "standard",
-            "points": 100, "files": [],
-        }
-        with trusted_attempt(challenge):
-            agent = brain.Brain(Mock(), Mock(), max_steps=40, verbose=False)
-        self.assertEqual(agent.max_steps, 4)
+    def test_trusted_points_do_not_override_runtime_step_budget(self):
+        for points in (100, 250, 500):
+            challenge = {
+                "id": points, "name": "step budget", "category": "crypto",
+                "type": "standard", "points": points, "files": [],
+            }
+            with trusted_attempt(challenge):
+                agent = brain.Brain(Mock(), Mock(), max_steps=17, verbose=False)
+            self.assertEqual(agent.max_steps, 17)
+
+    def test_step_budget_is_strictly_bounded(self):
+        for invalid in (True, "40", 0, -1, 151):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "max_steps"):
+                brain.Brain(Mock(), Mock(), max_steps=invalid, verbose=False)
+        self.assertEqual(brain.Brain(Mock(), Mock(), max_steps=150, verbose=False).max_steps, 150)
+
+    def test_each_model_turn_sees_remaining_budget_and_final_turn_instruction(self):
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": f"inspect-{index}"}),
+        }}]} for index in range(1, 4)]
+        agent = CapturingBrain(
+            replies, run_bash=Mock(return_value="new evidence"), submit_flag=Mock(),
+            max_steps=3, verbose=False,
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertEqual(result["final"], "step budget exhausted")
+        self.assertIn("model turn 1/3", agent.requests[0][-1]["content"])
+        self.assertIn("model turn 3/3", agent.requests[2][-1]["content"])
+        self.assertIn("Final model turn", agent.requests[2][-1]["content"])
+        self.assertIn("10 shell/checkpoint calls remain", agent.requests[2][-1]["content"])
 
     def test_production_chat_discovers_high_reasoning_and_settles_budget(self):
         class Response:
@@ -332,7 +356,10 @@ class BrainTests(unittest.TestCase):
             "checkpoint_finding",
             {tool["function"]["name"] for tool in agent._tools},
         )
-        self.assertEqual(agent.requests[1][-1]["content"], "Finding saved for this exact scope.")
+        self.assertIn(
+            "Finding saved for this exact scope.",
+            [message.get("content") for message in agent.requests[1]],
+        )
 
     def test_rejected_or_duplicate_findings_are_quiet(self):
         for disposition, summary, expected_calls in (
@@ -371,7 +398,10 @@ class BrainTests(unittest.TestCase):
 
         agent.solve("synthetic challenge")
 
-        assistant_turn = agent.requests[1][-2]
+        assistant_turn = next(
+            message for message in agent.requests[1]
+            if message.get("role") == "assistant" and "reasoning_details" in message
+        )
         self.assertEqual(assistant_turn["reasoning_details"], details)
         self.assertEqual(assistant_turn["tool_calls"], replies[0]["tool_calls"])
 

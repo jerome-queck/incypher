@@ -14,7 +14,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = "registry.in-cypher.com:5001"
 MODEL_KEYS = ("LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY")
-RUNTIME_KEYS = ("CTF_BASE", "CTF_TOKEN", *MODEL_KEYS, "MAX_STEPS", "MAX_SUBMISSIONS")
+RUNTIME_KEYS = (
+    "CTF_BASE", "CTF_TOKEN", *MODEL_KEYS,
+    "MAX_STEPS", "MAX_TOOL_CALLS", "MAX_SUBMISSIONS",
+    "MODEL_BUDGET_USD", "MODEL_CALL_RESERVE_USD",
+)
 
 
 def read_environment(path=ROOT / ".env", environ=None):
