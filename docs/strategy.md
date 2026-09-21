@@ -87,8 +87,10 @@ targets. There is no separate cumulative
 slice or call-count cutoff: durable model-dollar admission and a 24-hour process safety
 bound govern the run. The separate 6.5-hour pacing window is a soft spend target toward
 the competition horizon, not the process lifetime or dollar ceiling. All-solved/empty,
-provider/submission uncertainty, or an inherited nonzero return is terminal. The inherited
-main remains the sole lifecycle, submission and results owner.
+hard model-dollar exhaustion, or an inherited nonzero return is terminal. Per-attempt
+provider, submission, crash and malformed-response outcomes affect durable ranking and
+conservative cost reservations, but never kill the outer queue. The inherited main remains
+the sole lifecycle, submission and results owner.
 
 ## Verification and integration gate
 

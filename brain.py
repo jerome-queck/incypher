@@ -586,9 +586,16 @@ class Brain:
             messages.append({"role": "user", "content": budget_notice})
             try:
                 message = self._chat(messages)
-            except Exception as exc:  # noqa: BLE001 - failure is part of the result contract
+            except GatewayError as exc:
+                error = (
+                    "model budget exhausted"
+                    if str(exc) == "model budget exhausted"
+                    else f"{type(exc).__name__}: model request failed"
+                )
+                return {"solved": False, "steps": steps, "error": error}
+            except Exception as exc:  # noqa: BLE001 - raw provider/config details stay private
                 return {"solved": False, "steps": steps,
-                        "error": "%s: model request failed" % type(exc).__name__}
+                        "error": f"{type(exc).__name__}: model request failed"}
 
             if not isinstance(message, dict):
                 return {"solved": False, "steps": steps, "error": "malformed model message"}

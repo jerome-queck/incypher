@@ -401,14 +401,12 @@ class _OuterCoordinator:
         self,
         *,
         solved: bool,
-        outcome: AttemptOutcome,
+        budget_exhausted: bool = False,
     ) -> None:
         if time.monotonic() >= self.deadline:
             self.stop_reason = "run deadline"
-        if outcome is AttemptOutcome.PROVIDER:
-            self.stop_reason = "provider uncertainty"
-        elif outcome is AttemptOutcome.SUBMISSION:
-            self.stop_reason = "submission uncertainty"
+        if budget_exhausted:
+            self.stop_reason = "model budget exhausted"
         if not solved:
             self.pass_all_solved = False
 
@@ -520,7 +518,6 @@ def main():
                 state.checkpoint()
                 coordinator.note_result(
                     solved=False,
-                    outcome=AttemptOutcome.CRASH,
                 )
                 return {
                     "id": int(cid),
@@ -569,7 +566,9 @@ def main():
         state.checkpoint()
         coordinator.note_result(
             solved=solved,
-            outcome=outcome,
+            budget_exhausted=(
+                str(result.get("error", "")).lower() == "model budget exhausted"
+            ),
         )
         return result
 

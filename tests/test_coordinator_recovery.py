@@ -589,7 +589,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(allocated, [100, 100, 100])
 
-    def test_provider_uncertainty_stops_later_solver_dispatch(self):
+    def test_provider_failure_requeues_and_later_work_continues(self):
         challenges = [
             {"id": challenge_id, "name": f"provider-{challenge_id}",
              "category": "misc", "type": "standard", "value": 100, "files": []}
@@ -599,6 +599,11 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         def solve_challenge(client, ch, max_steps):
             attempted.append(ch["id"])
+            if len(attempted) > 1:
+                return {
+                    "solved": True, "steps": 1,
+                    "model_calls": 1, "tool_calls": 0,
+                }
             return {
                 "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 0,
                 "error": "GatewayError: model request failed",
@@ -616,9 +621,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [41])
+        self.assertEqual(attempted, [41, 41, 42])
 
-    def test_malformed_provider_message_stops_later_solver_dispatch(self):
+    def test_malformed_provider_message_requeues_and_later_work_continues(self):
         challenges = [
             {"id": challenge_id, "name": f"malformed-{challenge_id}",
              "category": "misc", "type": "standard", "value": 100, "files": []}
@@ -628,6 +633,11 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         def solve_challenge(client, ch, max_steps):
             attempted.append(ch["id"])
+            if len(attempted) > 1:
+                return {
+                    "solved": True, "steps": 1,
+                    "model_calls": 1, "tool_calls": 0,
+                }
             solver.run_bash("inspect malformed response")
             return {
                 "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 1,
@@ -649,7 +659,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [43])
+        self.assertEqual(attempted, [43, 43, 44])
 
     def test_crashed_slices_do_not_shrink_later_configured_slice_budget(self):
         challenges = [{
@@ -665,8 +675,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             if len(attempted) < 3:
                 raise RuntimeError("synthetic crash after accepted turns")
             return {
-                "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 0,
-                "error": "GatewayError: model request failed",
+                "solved": True, "steps": 1, "model_calls": 1, "tool_calls": 0,
             }
 
         official, solver = self._harness(
@@ -692,7 +701,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(attempted, [(71, 100), (71, 100), (71, 100)])
 
-    def test_submission_uncertainty_stops_later_solver_dispatch(self):
+    def test_submission_uncertainty_requeues_and_later_work_continues(self):
         challenges = [
             {"id": challenge_id, "name": f"submission-{challenge_id}",
              "category": "misc", "type": "standard", "value": 100, "files": []}
@@ -702,6 +711,11 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         def solve_challenge(client, ch, max_steps):
             attempted.append(ch["id"])
+            if len(attempted) > 1:
+                return {
+                    "solved": True, "steps": 1,
+                    "model_calls": 1, "tool_calls": 0,
+                }
             return {
                 "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 0,
                 "error": "submission unavailable: uncertain",
@@ -722,9 +736,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [51])
+        self.assertEqual(attempted, [51, 51, 52])
 
-    def test_raised_submission_callback_stops_later_solver_dispatch(self):
+    def test_raised_submission_callback_requeues_and_later_work_continues(self):
         challenges = [
             {"id": challenge_id, "name": f"raised-submission-{challenge_id}",
              "category": "misc", "type": "standard", "value": 100, "files": []}
@@ -734,6 +748,11 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         def solve_challenge(client, ch, max_steps):
             attempted.append(ch["id"])
+            if len(attempted) > 1:
+                return {
+                    "solved": True, "steps": 1,
+                    "model_calls": 1, "tool_calls": 0,
+                }
             prompt = solver.build_prompt(ch, material_directory, [], None)
             replies = [{"content": "", "tool_calls": [{"id": "submit", "function": {
                 "name": "submit_flag",
@@ -763,7 +782,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [53])
+        self.assertEqual(attempted, [53, 53, 54])
 
     def test_deadline_is_hard_but_slice_count_does_not_abandon_unsolved_work(self):
         self.assertEqual(arena_main._MAX_RUN_SECONDS, 86_400)

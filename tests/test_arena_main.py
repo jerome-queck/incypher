@@ -114,6 +114,23 @@ class ArenaSelectionTests(unittest.TestCase):
         coordinator.begin_pass()
         self.assertEqual(coordinator.admit(4), (4, None))
 
+    def test_attempt_failures_do_not_stop_the_outer_queue(self):
+        for error in (
+            "model request failed",
+            "malformed model message",
+            "submission unavailable: uncertain",
+        ):
+            with self.subTest(error=error):
+                coordinator = arena_main._OuterCoordinator()
+                self.assertEqual(coordinator.admit(4), (4, None))
+                coordinator.note_result(solved=False)
+                self.assertTrue(coordinator.should_continue())
+
+        coordinator = arena_main._OuterCoordinator()
+        self.assertEqual(coordinator.admit(4), (4, None))
+        coordinator.note_result(solved=False, budget_exhausted=True)
+        self.assertFalse(coordinator.should_continue())
+
     def test_per_slice_budget_exhaustion_is_requeueable_not_provider_uncertainty(self):
         shell = SimpleNamespace(failure_outcome=None)
         for error in ("tool call budget exhausted", "submission budget exhausted"):
@@ -128,6 +145,76 @@ class ArenaSelectionTests(unittest.TestCase):
             ),
             arena_main.AttemptOutcome.PROVIDER,
         )
+
+    def test_tool_budget_exhaustion_cycles_into_a_later_solve_pass(self):
+        challenge = {
+            "id": 1,
+            "name": "synthetic",
+            "category": "misc",
+            "type": "standard",
+            "points": 100,
+            "files": [],
+        }
+        official = ModuleType("main")
+        official.is_practice = lambda ch: False
+        solver = ModuleType("budget_cycle_solver")
+        solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
+        solver.run_bash = lambda cmd: "unused"
+        attempts = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempts.append(int(ch["id"]))
+            if len(attempts) == 1:
+                return {
+                    "solved": False,
+                    "steps": 1,
+                    "model_calls": 1,
+                    "tool_calls": 1,
+                    "error": "tool call budget exhausted",
+                }
+            return {
+                "solved": True,
+                "steps": 1,
+                "model_calls": 1,
+                "tool_calls": 0,
+            }
+
+        solve_challenge.__module__ = "budget_cycle_solver"
+        official.solve_challenge = solve_challenge
+
+        class Client:
+            def __init__(self, base, token):
+                self.base, self.token = base, token
+
+            def list_challenges(self):
+                return [dict(challenge, solved=False)]
+
+            def challenge(self, cid):
+                return dict(challenge)
+
+        official.CTFdClient = Client
+        main_calls = []
+
+        def inherited_main():
+            main_calls.append(1)
+            client = official.CTFdClient("base", "token")
+            targets = [item for item in client.list_challenges() if not item.get("solved")]
+            targets.sort(key=lambda item: item["id"])
+            for brief in targets:
+                official.solve_challenge(client, client.challenge(brief["id"]), 3)
+            return 0
+
+        official.main = inherited_main
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules,
+            {"main": official, "budget_cycle_solver": solver},
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True), patch("arena_main.time.sleep"):
+            self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempts, [1, 1])
+        self.assertEqual(len(main_calls), 2)
 
     def test_changed_official_hook_fails_before_harness_runs(self):
         official = SimpleNamespace(main=lambda: self.fail("changed harness must be inspected"))
