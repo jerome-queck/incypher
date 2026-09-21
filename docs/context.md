@@ -51,11 +51,16 @@ locally but not pushed over the progressing live run.
   arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
   persistent solving and queue rotation. The board now explicitly charges 100 points for
   every re-upload after the first scored run begins, so the working run is not replaced.
-- The local successor passes 370 portable tests with 25 expected skips.
-  Clean AMD64 Day-2 image
-  `sha256:be04f8f418c34197e23e5fef017e374f73ed1100f182ea816b16f5bb06ba3b1d`
-  is 284,041,157 bytes, passes checker 6/0/2, contains no Day-1 secret/selector, and
-  supplies a discoverable image model policy for the organizer's two injected variables.
+- Local successor runtime `4afd1d4` passes 370 portable tests with 25 expected skips.
+  Exact AMD64 Day-2 image
+  `sha256:4397de6c5bd7ad2a9a3bb783ec3b476260d0d494a153868f3083715f3d2fd310`
+  is 284,043,148 bytes, passes checker 6/0/2, contains no Day-1 secret/selector, and
+  passes 364 non-entrypoint tests inside the read-only 2 CPU/2 GiB/256-PID sandbox as
+  non-root with ResourceWarnings fatal. The six entrypoint tests pass in the 370-test host
+  suite. Checked Day-1 fallback
+  `sha256:4d7dc45431f72d36afbcd7f491e76b8a7b092cec537b286e30135636592157e2`
+  is 284,043,463 bytes, passes checker 6/0/2, contains exactly the five expected private
+  model/budget names and no validation selector. Neither exact-head image has been pushed.
 
 - Public board reset at **22 Sep 02:00 SGT** from 7/15 to 0/15. Push #13 used a clean
   Day-2 image during Day 1 and finished 0/15. At 02:14:37 both corrective Day-1 pushes
