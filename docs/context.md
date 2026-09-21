@@ -40,21 +40,26 @@ PR4 adds strict typed safe findings and serial same-run revisits governed by
 The deployed runtime removes arbitrary cumulative slice/call abandonment, retains the
 per-slice inherited `MAX_STEPS` and dollar governor, and adds durable adaptive spend pacing.
 PR #18 merged bounded five-minute public crowd signals, fail-closed Day-2 model
-discovery, unresolved-dispatch shutdown and scoped submission reconciliation. The
-separate 16/20 packaged-slice candidate is under local verification.
+discovery, unresolved-dispatch shutdown and scoped submission reconciliation. PR #19
+merged the measured 16-model/20-tool packaged slice; its Day-1 image is push #22.
 
 ## Evidence and release identity
 
 - Day-1 push #20, source `3a3452e`, remote digest
   `sha256:44065c5107ddcbc132932e32563b04c7d10bf60cb07116c2b4ec9e3b2fd0166e`,
-  began scoring at 03:10 SGT and remains `running`. By 04:10 it earned eleven fresh
+  began scoring at 03:10 SGT and earned eleven fresh
   arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
   persistent solving and queue rotation. The board now explicitly charges 100 points for
   every re-upload after the first scored run begins. At 04:15 the explicitly requested
   replacement push #21 registered immediately; the registry confirms exact Day-1 digest
   `sha256:c7c21321634911e86d20d4b8eb2d1c6d2a314d88d2ad30524e08c209425e76d4`.
-  At 04:25 the public row remained `running`, 11/15 and penalty 0. It does not expose
-  the active run's digest; pickup of #21 is not yet proven.
+  At 04:30 the public row remained `running`, 11/15 and penalty 0. It does not expose
+  the active run's digest; pickup of #21 is not proven. User-requested push #22 at
+  04:30:59 now makes the independently verified remote `latest`
+  `sha256:d7c560ff5bdbd40724f802e006d3d1835f5308c912a9fcb7e8b847009afd7f07`.
+  At the 04:35 cycle the board remained RUNNING at 11/15, 2,250 VALID, rank 2 and
+  penalty 0. It registered push count 22 but still exposed no active digest or new solve;
+  actual pickup remains unproven.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -80,26 +85,29 @@ separate 16/20 packaged-slice candidate is under local verification.
   0.00673036. These are synthetic local outcomes, not proof for the four live unsolved
   challenges. The checked Day-1 variant is
   `sha256:d7c560ff5bdbd40724f802e006d3d1835f5308c912a9fcb7e8b847009afd7f07`;
-  both are AMD64/checker 6/0/2 and not submitted. Next: review/merge the bounded
-  horizon change, inspect board pickup/penalty, then consider a readiness-gated release.
+  both are AMD64/checker 6/0/2. PR #19 passed two independent reviews, both CI runs,
+  375 host tests/25 skips and 369 exact-image restricted-container tests, and merged as
+  `66613ef`; the Day-1 variant was pushed as #22. The clean Day-2 image remains local.
 
 - Public board reset at **22 Sep 02:00 SGT** from 7/15 to 0/15. Push #13 used a clean
   Day-2 image during Day 1 and finished 0/15. At 02:14:37 both corrective Day-1 pushes
   registered; push #15, last 02:10:01, reached `running` on both status and scores at
   02:15:46, then changed to `collecting` by 02:18:20 with 0/15 and penalty 0. This is
-  a real early process exit; the queued runtime still contains the old no-progress stop
-  that the current candidate removes. Read `/scores` and `/status` again for collection.
+  a historical early process exit; that image retained the old no-progress stop. Later
+  push #20 proved the corrected persistent queue on eleven fresh arena-origin solves.
 - Historical push #15 had the metadata-distinct Day-1 AMD64 digest
   `sha256:a9ecc2d9192eab938c6c34d51107ecd3ef338e64f52a98a84eb484d165ce8725`.
   It embeds only the model triplet plus a USD 19/fixed-high policy, has no CTF token or
   validation selector, passes checker 6/0/2, and its exact in-image harness/practice
   guards pass. Its queued runtime source was `a43e59b`; it is no longer registry
-  `latest` after push #21.
+  `latest` after push #22.
 - Source docs previously called an older digest “current.” That is historical evidence
   only: public status does not identify the deployed digest or its source commit.
-- [Arena contract](arena-contract.md) records an earlier inspected base/harness.
-  Fresh registry manifest inspection in this pass returned authentication required;
-  the official base is not cached on this machine. Current base drift remains unknown.
+- [Arena contract](arena-contract.md) records an earlier inspected base/harness. Both
+  checked successors build from authenticated base digest
+  `sha256:081f5477e3b222185a7265beacb9a90505b589a389adaa3352cf7afb4709531e`;
+  inherited AST guards and the bundled checker passed. Reinspect the current tag before
+  Day-2 release; a future base-tag change remains possible.
 - PR3 merged through PR #17 as `8b86f1c`; exact merged AMD64 image
   `sha256:60ba38f971224119de9b16a23cb50af76ad046bc53506dbf3ce35dc2003b2c83`
   passed 300 tests/25 skips, checker 6/0/2, eight AST guards and 67 focused Linux tests.
@@ -187,28 +195,20 @@ separate 16/20 packaged-slice candidate is under local verification.
 
 ## Next work, in order
 
-The user has requested an overnight capability build. Start from the
-[build brief](solver-build/brief.md) and its [launch prompt](solver-build/prompt.md).
-The brief owns this session's goals, deadlines, delegation and Day-1 release authority;
-its research records the audited starting gaps. Private progress lives under ignored
-`private/solver-build-20260921/`. Architecture and PR ordering remain build-session
-decisions. The prompt-authoring pass changed documentation only; solver readiness is
-unchanged. A 21 Sep 23:30 SGT public-board refresh still showed 5/15, VALID/SCORE 650,
-12 pushes, `done`, penalty 0. No paid request or arena release was made by that pass.
+The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and clean
+Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
+holds detailed cost, experiment and provenance records. Current priorities:
 
-The ordered technical gates below are current after PR3 merge and PR4 implementation.
-
-1. **Freeze, review and merge the current candidate.** Require independent Standards and
-   Spec pass, exact AMD64 structural/Linux checks, PR/CI and merged-tree rebuild.
-2. **Monitor running Day-1 push #20.** Preserve it while it progresses because replacement
-   costs 100 points. Record origin transitions and scores separately from registry/queue
-   evidence. Do not manually solve live tasks or request an organiser rerun.
-3. **Measure before optimizing.** Compare identical practice tasks and budgets for baseline
-   versus a change. Prioritize valid points per cost/time, coverage and recovery. Static
-   parallelism is permitted but unimplemented; dynamic capacity is globally one.
-4. **Prepare the clean Day-2 image.** Follow [release gates](setup.md#day-2-release).
-   Read runtime-injected model configuration; neither a Sol/Astra pin nor a local
-   subscription is a substitute. Record the pushed digest and board outcome separately.
+1. **Monitor push #22 without manual solving.** Read public status/scores through upcoming
+   cycles; distinguish registration, active-image pickup, VALID solves and penalties.
+   Its registry digest is proven; the board does not identify the active digest. Do not
+   request an organiser rerun or repeat an unchanged push.
+2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
+   controls active. Make a new image only after a bounded, measured capability change;
+   re-uploads can cost 100 points. Preserve negative local held-out results.
+3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
+   fresh base/contract drift, and follow [release gates](setup.md#day-2-release). Do not
+   treat structural checks or local solves as competition acceptance.
 
 Known limits: shell operations may overlap inside one model conversation, but challenge
 lifecycles and inherited passes remain serial, so dynamic capacity stays one. Durable typed
