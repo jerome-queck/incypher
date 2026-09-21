@@ -744,15 +744,14 @@ class RuntimeState:
                 }[status]
                 if current == "conflict":
                     resolved = current
-                elif current in {"accepted", "rejected"}:
-                    if classified in {"accepted", "rejected"} and classified != current:
-                        resolved = "conflict"
-                    else:
-                        resolved = current
-                elif classified in {"accepted", "rejected"}:
-                    resolved = classified
-                elif current == "already_solved":
-                    resolved = current
+                elif {current, classified} == {"accepted", "rejected"}:
+                    resolved = "conflict"
+                elif "accepted" in {current, classified}:
+                    resolved = "accepted"
+                elif "already_solved" in {current, classified}:
+                    resolved = "already_solved"
+                elif "rejected" in {current, classified}:
+                    resolved = "rejected"
                 else:
                     resolved = classified
                 if resolved != current:
