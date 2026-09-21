@@ -8,7 +8,9 @@ performs one transport attempt; retry policy belongs to a later integration seam
 from __future__ import annotations
 
 import json
+import math
 import os
+import queue
 import sqlite3
 import threading
 import time
@@ -24,6 +26,10 @@ from typing import Any
 
 _MAX_IDENTIFIER = 256
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+_MAX_DECIMAL_CHARACTERS = 64
+_MAX_DECIMAL_DIGITS = 28
+_MIN_DECIMAL_EXPONENT = -18
+_MAX_DECIMAL_EXPONENT = 18
 
 
 class CostProvenance(str, Enum):
@@ -36,8 +42,10 @@ class GatewayError(RuntimeError):
     """A bounded, credential-free provider failure."""
 
 
-class BudgetExhausted(RuntimeError):
-    pass
+class GatewayTimeout(GatewayError):
+    """The caller deadline elapsed; provider completion and cost are unknown."""
+
+    dispatch_unresolved = True
 
 
 class LedgerCapacityError(RuntimeError):
@@ -91,8 +99,17 @@ class RequestOptions:
     reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
-        if self.temperature is not None and not isinstance(self.temperature, (int, float)):
-            raise ValueError("temperature must be numeric")
+        if self.temperature is not None:
+            if isinstance(self.temperature, bool) or not isinstance(
+                self.temperature, (int, float)
+            ):
+                raise ValueError("temperature must be a finite number")
+            try:
+                finite = math.isfinite(self.temperature)
+            except OverflowError:
+                finite = False
+            if not finite:
+                raise ValueError("temperature must be a finite number")
         if self.max_tokens is not None and (
             type(self.max_tokens) is not int or self.max_tokens <= 0
         ):
@@ -164,11 +181,21 @@ def _nonnegative_int(value: Any) -> int | None:
 def _money(value: Any) -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
+    serialized = str(value)
+    if len(serialized) > _MAX_DECIMAL_CHARACTERS:
+        return None
     try:
-        amount = Decimal(str(value))
+        amount = Decimal(serialized)
     except (InvalidOperation, ValueError):
         return None
-    return amount if amount.is_finite() and amount >= 0 else None
+    if not amount.is_finite() or amount < 0:
+        return None
+    decimal_tuple = amount.as_tuple()
+    if len(decimal_tuple.digits) > _MAX_DECIMAL_DIGITS:
+        return None
+    if not _MIN_DECIMAL_EXPONENT <= decimal_tuple.exponent <= _MAX_DECIMAL_EXPONENT:
+        return None
+    return amount
 
 
 def normalize_response(
@@ -227,6 +254,14 @@ class ModelGateway:
             raise ValueError("timeout must be finite and at most 600 seconds")
         self.transport = transport
         self.timeout_seconds = float(timeout_seconds)
+        self._dispatch_lock = threading.Lock()
+        self._active_dispatch: threading.Thread | None = None
+
+    @property
+    def dispatch_active(self) -> bool:
+        """Whether a transport worker is still running after dispatch."""
+        with self._dispatch_lock:
+            return self._active_dispatch is not None and self._active_dispatch.is_alive()
 
     def complete(
         self,
@@ -238,17 +273,60 @@ class ModelGateway:
         estimated_cost: Decimal | str | None = None,
     ) -> ModelResponse:
         payload = build_request(identity, messages, capabilities, options)
-        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        try:
+            body = json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+        except (TypeError, ValueError):
+            raise ValueError("request payload is not finite JSON") from None
         headers = {
             "Authorization": "Bearer " + identity.api_key,
             "Content-Type": "application/json",
         }
+        outcome: queue.Queue[tuple[bool, bytes | Mapping[str, Any] | None]] = queue.Queue(
+            maxsize=1
+        )
+
+        def dispatch() -> None:
+            try:
+                raw_result = self.transport(
+                    identity.endpoint, headers, body, self.timeout_seconds
+                )
+            except Exception:
+                # Provider exception bodies commonly contain request headers or remote
+                # payloads. Deliberately discard them before crossing the worker seam.
+                outcome.put((False, None))
+            else:
+                outcome.put((True, raw_result))
+
+        with self._dispatch_lock:
+            if self._active_dispatch is not None:
+                if self._active_dispatch.is_alive():
+                    raise GatewayError("provider request is already in flight")
+                self._active_dispatch = None
+            worker = threading.Thread(
+                target=dispatch,
+                name="model-gateway-transport",
+                daemon=True,
+            )
+            self._active_dispatch = worker
+            worker.start()
         try:
-            raw = self.transport(identity.endpoint, headers, body, self.timeout_seconds)
-        except Exception:
-            # Provider exception bodies commonly contain request headers or remote
-            # payloads.  Deliberately discard them and never retry here.
-            raise GatewayError("provider request failed") from None
+            succeeded, raw = outcome.get(timeout=self.timeout_seconds)
+        except queue.Empty:
+            # Python cannot safely cancel a blocked thread. Keep its identity attached
+            # to this gateway so another dispatch cannot overlap while it remains live.
+            raise GatewayTimeout("provider request timed out; dispatch is unresolved") from None
+        finally:
+            if not worker.is_alive():
+                with self._dispatch_lock:
+                    if self._active_dispatch is worker:
+                        self._active_dispatch = None
+        if not succeeded:
+            raise GatewayError("provider request failed")
         if isinstance(raw, bytes):
             if len(raw) > _MAX_RESPONSE_BYTES:
                 raise GatewayError("provider response exceeded the size limit")

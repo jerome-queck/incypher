@@ -1,6 +1,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +10,7 @@ from agent_ext.model_gateway import (
     BudgetLedger,
     CostProvenance,
     GatewayError,
+    GatewayTimeout,
     ModelGateway,
     ProviderCapabilities,
     ProviderIdentity,
@@ -49,6 +51,11 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(payload["reasoning_effort"], "high")
         self.assertEqual(payload["temperature"], 0.3)
         self.assertNotIn("reasoning", payload)
+
+    def test_temperature_rejects_bool_nan_and_infinity(self):
+        for value in (True, False, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "finite"):
+                RequestOptions(temperature=value)
 
     def test_no_capability_means_no_optional_parameters_or_substitution(self):
         payload = build_request(
@@ -106,6 +113,47 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(response.message["content"], "done")
         self.assertEqual(response.observed_model, "actual/model")
 
+    def test_gateway_json_serialization_rejects_nested_nonfinite_values(self):
+        called = False
+
+        def transport(*args):
+            nonlocal called
+            called = True
+            return {}
+
+        with self.assertRaisesRegex(ValueError, "finite JSON"):
+            ModelGateway(transport).complete(
+                self.identity,
+                [{"role": "user", "content": float("nan")}],
+                ProviderCapabilities(),
+            )
+        self.assertFalse(called)
+
+    def test_gateway_enforces_deadline_and_blocks_repeat_while_worker_lives(self):
+        release = threading.Event()
+        calls = []
+
+        def blocked(*args):
+            calls.append(args)
+            release.wait()
+            return {"choices": [{"message": {"role": "assistant", "content": "late"}}]}
+
+        gateway = ModelGateway(blocked, timeout_seconds=0.02)
+        started = time.monotonic()
+        with self.assertRaises(GatewayTimeout) as caught:
+            gateway.complete(self.identity, self.messages, ProviderCapabilities())
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertTrue(caught.exception.dispatch_unresolved)
+        self.assertTrue(gateway.dispatch_active)
+        with self.assertRaisesRegex(GatewayError, "already in flight"):
+            gateway.complete(self.identity, self.messages, ProviderCapabilities())
+        self.assertEqual(len(calls), 1)
+        release.set()
+        deadline = time.monotonic() + 1
+        while gateway.dispatch_active and time.monotonic() < deadline:
+            time.sleep(0.005)
+        self.assertFalse(gateway.dispatch_active)
+
 
 class LedgerTests(unittest.TestCase):
     def setUp(self):
@@ -161,6 +209,29 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "budget limit differs"):
             BudgetLedger(self.path, "20")
         self.assertEqual(BudgetLedger(self.path, "10").snapshot().unresolved_cost, Decimal("4"))
+
+    def test_decimal_precision_exponent_and_serialized_length_are_bounded(self):
+        invalid = (
+            "0.12345678901234567890123456789",
+            "1e-19",
+            "1e19",
+            "1" * 65,
+        )
+        for index, value in enumerate(invalid):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "finite"):
+                self.ledger.reserve(f"invalid-{index}", value)
+
+        self.assertTrue(
+            self.ledger.reserve("bounded", Decimal("0.123456789012345678")).admitted
+        )
+
+    def test_malformed_overprecision_response_cost_is_unknown(self):
+        response = normalize_response({
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"cost": "0.12345678901234567890123456789"},
+        })
+        self.assertIsNone(response.usage.cost)
+        self.assertEqual(response.usage.cost_provenance, CostProvenance.UNKNOWN)
 
     def test_estimate_can_be_replaced_by_late_measurement(self):
         self.ledger.reserve("estimated", "5")
