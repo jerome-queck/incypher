@@ -99,18 +99,27 @@ A fresh local #26 Day-1 adaptive two-slice P2 run B40d passed with 11 real
 8,192/high calls, ten tools, one correct/zero wrong submission and USD0.00594319
 measured. Earlier short B40 guessed incorrectly before a later correct answer;
 B40b/c were consumed by private evaluator errors, not production failures.
-The public 05:40 cycle remains RUNNING at 11/15, 2,250 VALID and penalty 0.
-The provider's current-key aggregate usage at 05:35 was USD3.25536813/20;
-since #26 embeds a USD19 cap, a fresh ledger after replacement could otherwise
-outlast the remaining provider balance. A local unpushed follow-up now allows
-only downward durable budget-cap migration; its 385-test host suite (25
-expected skips), exact clean Day-2 restricted 379-test suite and both image
+The published #27 image passed a new fresh local three-lane B41 battery:
+crypto 4/3, network 12/12, reversing 12/11 model/tool calls, each with one
+correct/zero wrong submission and zero unresolved spend; aggregate USD0.02392435.
+Neither local battery proves the four remaining live solves. The public 05:55
+cycle remains RUNNING at 11/15, 2,250 VALID and penalty 0.
+The provider's current-key aggregate usage at 05:48 was USD3.47254776/20;
+since #26 embedded a USD19 cap, a fresh ledger after replacement could otherwise
+outlast the remaining provider balance. PR #27 now allows only downward durable
+budget-cap migration; its 385-test host suite (25 expected skips), exact
+clean Day-2 restricted 379-test suite and both image
 checkers 6/0/2 pass. Clean Day-2
 `sha256:90b612610530fe9c822dcf66f2142a727fc760477b8b3c50b98264b4e5a867b8`
 has no secret/selector; matching Day-1
 `sha256:dcf1b0a74e962252af227067182bf2d12594dc614905bc4ae764d4696c2620a8`
-has only the five intended names and a USD15 cap. Review, merge and remote
-release still remain before replacing #26.
+has only the five intended names and a USD15 cap. The independent Standards
+finding about a stale next action was closed at `e6a0705`; Spec and CI passed,
+and PR #27 merged as `01cf968`.
+The Day-1 image was pushed at 05:51:38 as #27; the remote digest independently
+matched and the board registered RUNNING with no active digest or new VALID
+proof. The clean Day-2 image remains local. The ignored local `.env` numeric
+budget was also lowered to USD15; no credential value changed.
 
 ## Evidence and release identity
 
@@ -160,6 +169,14 @@ release still remain before replacing #26.
   At the 05:35 cycle the board registered #26 RUNNING, 11/15 and 2,250 VALID,
   penalty 0, but exposed no active image identity or fresh solve. The 15/15
   live gate stays open.
+  PR #27 merged as `01cf968`; checked Day-1
+  `sha256:dcf1b0a74e962252af227067182bf2d12594dc614905bc4ae764d4696c2620a8`
+  was pushed as #27 at 05:51:38. Independent remote inspection matched;
+  the board immediately registered #27 RUNNING, while the 05:50 cycle was
+  still 11/15, 2,250 VALID, rank 2, penalty 0. Active digest and pickup
+  remain unexposed. At the 05:55 cycle scores briefly showed COLLECTING while
+  status showed RUNNING, then both reported RUNNING by 05:55:25 with no new
+  VALID event or hard failure. This transient alone does not justify rollback.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -299,13 +316,13 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #26 without manual solving.** Read public status/scores through upcoming
+1. **Monitor push #27 without manual solving.** Read public status/scores through upcoming
    cycles; distinguish registration, active-image pickup, VALID solves and penalties.
    Its registry digest is proven; the board does not identify the active digest. Do not
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
-   controls active. Finish review/CI for the checked USD15 successor before a
-   replacement; then test a measurable capability improvement for further images.
+   controls active. Test a measurable capability improvement before any further
+   replacement; retain the proven #20 image if a hard regression is observed.
    Use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
