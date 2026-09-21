@@ -15,6 +15,11 @@ class ScriptedBrain(brain.Brain):
         return next(self.replies)
 
 
+class FailingBrain(brain.Brain):
+    def _chat(self, messages):
+        raise TimeoutError("synthetic timeout")
+
+
 class BrainTests(unittest.TestCase):
     def test_full_lifecycle_runs_command_then_submits(self):
         candidate = "INCYPHER" + "{synthetic-lifecycle}"
@@ -92,6 +97,57 @@ class BrainTests(unittest.TestCase):
         self.assertFalse(result["solved"])
         self.assertEqual(result["error"], "submission budget exhausted")
         self.assertEqual(len(submitted), 3)
+
+    def test_rate_limit_is_terminal_and_not_retried(self):
+        candidate = "INCYPHER" + "{rate-limit-test}"
+        replies = [{"content": candidate}, {"content": candidate}]
+        submitted = []
+        agent = ScriptedBrain(
+            replies,
+            run_bash=lambda command: "unused",
+            submit_flag=lambda flag: submitted.append(flag) or {"status": "ratelimited"},
+            verbose=False,
+        )
+
+        result = agent.solve("sample")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["error"], "submission unavailable: ratelimited")
+        self.assertEqual(submitted, [candidate])
+
+    def test_model_timeout_is_reported_as_failure(self):
+        agent = FailingBrain(
+            run_bash=lambda command: "unused",
+            submit_flag=lambda flag: {"status": "correct"},
+            verbose=False,
+        )
+
+        result = agent.solve("sample")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["steps"], 1)
+        self.assertIn("TimeoutError", result["error"])
+
+    def test_malformed_tool_arguments_do_not_crash_loop(self):
+        commands = []
+        replies = [
+            {"content": "", "tool_calls": [{"id": "broken", "function": {
+                "name": "run_bash", "arguments": "not-json",
+            }}]},
+            {"content": "No supported result."},
+        ]
+        agent = ScriptedBrain(
+            replies,
+            run_bash=lambda command: commands.append(command) or "empty command rejected",
+            submit_flag=lambda flag: {"status": "correct"},
+            verbose=False,
+        )
+
+        result = agent.solve("sample")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(commands, [""])
+        self.assertEqual(result["final"], "No supported result.")
 
     def test_redacts_flags_from_logs(self):
         candidate = "INCYPHER" + "{secret}"
