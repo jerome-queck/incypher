@@ -66,6 +66,23 @@ class RequestTests(unittest.TestCase):
         )
         self.assertEqual(payload, {"model": "injected/model", "messages": self.messages})
 
+    def test_tools_and_completion_limit_are_capability_gated(self):
+        tool = {"type": "function", "function": {"name": "inspect"}}
+        payload = build_request(
+            self.identity,
+            self.messages,
+            ProviderCapabilities(frozenset({
+                "tools", "tool_choice", "max_completion_tokens",
+            })),
+            RequestOptions(max_tokens=321),
+            tools=[tool],
+            tool_choice="auto",
+        )
+        self.assertEqual(payload["tools"], [tool])
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertEqual(payload["max_completion_tokens"], 321)
+        self.assertNotIn("max_tokens", payload)
+
     def test_normalizes_measured_estimated_missing_and_malformed_usage(self):
         base = {"model": "observed", "choices": [{"message": {"role": "assistant", "content": "ok"}}]}
         measured = normalize_response({**base, "usage": {

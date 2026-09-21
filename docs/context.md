@@ -15,10 +15,10 @@ were merged. No open PR contained the requested general practice-selection chang
 
 | Path | Actual status | Consequence |
 | --- | --- | --- |
-| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; practice filter disabled by a narrow wrapper | Official selection (`ONLY_IDS`), solving, instance lifecycle and results remain inherited |
+| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; practice selection and trusted per-challenge context wrappers | Official selection (`ONLY_IDS`), solving, instance lifecycle and results remain inherited; signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
-| `brain.py`, `agent_ext/adapters.py` | Active synchronous Chat Completions loop | Shell + submit tools; no category skills, memory, cost ledger or scheduler wired in |
-| `agent_ext/model_gateway.py` | Reviewed foundation; not connected to Brain | Exact injected identity, capability-gated options and durable cost reservations exist; production discovery/admission/wiring remain open |
+| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, point-based call caps, tool/submission caps, 48 KiB context and deterministic category playbook; shell remains synchronous |
+| `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, high reasoning when supported and durable conservative ledger; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `resources.py`, `tools/` | Merged fixed local inspections | Not a bounded replacement for arbitrary shell; not invoked by normal Brain |
 | `memory.py`, `verification.py`, `submission_state.py`, `results.py` | Merged evidence/SQLite helpers | Production callbacks and official result mapping remain unconnected |
@@ -51,12 +51,28 @@ raw provider exception text leaking into results. The optional bridge retains it
   from official base `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
   The checker passed 6/6 checks with the expected root/no-token warnings; Day-1 secrets
   and validation selector were absent. This is a local rollback identity, not a release.
-- Frozen gateway candidate `c03f0bb` produced local AMD64 Day-2 image
+- Merged gateway PR #15 produced local AMD64 Day-2 image
   `sha256:0bc8f980859e3367dc78e5c977016bf2059bf5fc53c03c004bb60cbc0143a074`.
   Its checker passed 6/6 with the same expected warnings; an in-image Python 3.12 import
   of `ModelGateway` and `BudgetLedger` passed. The candidate suite passed 235 tests on
   macOS with 19 Linux-only skips. A later documentation-only evidence commit does not
-  alter any path copied by the Dockerfile.
+  alter any path copied by the Dockerfile. Merge commit `8627839` is the PR2 base.
+- Runtime-integration candidate `58eaae8` produced local AMD64 Day-2 image
+  `sha256:aec2048b24b21427f749f35c4383270318bb2f817e199a4e16f1f413fb2176f2`.
+  The checker passed 6/6 with the two expected warnings, and the macOS suite passed
+  259 tests with 19 Linux-only skips. A preregistered, non-submitting Luna/high fixture
+  exercised discovery, two model turns, one tool result, preserved provider reasoning
+  metadata, one exact in-process submission and settled USD 0.0002678 with no unresolved
+  reservation. This is local synthetic evidence, not practice or arena acceptance.
+  Frozen review of head `02976ca` requested bounded HTTP streaming, prompt-safe trusted
+  enums, fixed budget-policy bounds, catalogue-authorized canonical identity, full-or-reject
+  file hashing and integrated lifecycle/fault coverage. Fix head `eb93ec0` passed 269 tests
+  with 19 expected macOS skips and produced checked AMD64 image
+  `sha256:cb07da46ef61f9135bfd7ab32c81dd61736d40c6fa58a0a8991177289adbafc8`
+  (284,214,719 bytes; checker 6/0/2 expected warnings; in-image imports passed).
+  Preregistered B4 on that exact image repeated the Luna/high fixture in 7.145s: two
+  model calls, one tool, one correct in-process submission, USD 0.0002720 measured and
+  zero unresolved. This evidence closes the fix-head pre-review checks, not CTF capability.
 - Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
   Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
   macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,
@@ -77,9 +93,9 @@ unchanged. A 21 Sep ~21:29 SGT public-board refresh still showed 5/15, VALID/SCO
 The ordered technical gates below remain the starting baseline; the build session
 may resequence them using the brief and measured evidence.
 
-1. **Merge and wire model admission.** The gateway/ledger foundation is deliberately
-   unconnected. Bind it only through the inspected trusted challenge hook; preserve the
-   inherited instance lifecycle, submission callback and sole results writer.
+1. **Validate the integrated model path.** The exact-image non-submitting Luna/high
+   fixture passes. Next use held-out local fixtures and one readiness-gated fresh-material
+   practice validation; confirm inherited cleanup/results behavior before release.
 2. **Prove solving.** Use one explicitly selected practice challenge via `scripts/arena.py`
    or local Codex practice. Record accepted outcome, elapsed time and model/tool usage
    privately; report sanitized counts. Local/manual solves do not prove arena VALID.
@@ -94,12 +110,12 @@ may resequence them using the brief and measured evidence.
    Read runtime-injected model configuration; neither a Sol/Astra pin nor a local
    subscription is a substitute. Record the pushed digest and board outcome separately.
 
-Known limits to investigate: fixed 180s model/120s command calls can exceed proposed
-attempt deadlines; shell output is captured before the 12,000-character model excerpt;
-normal Brain has no persisted dedupe across restarts, dollar budget accounting, transient
-model retry or watchdog. Its `temperature`/`max_tokens` request compatibility with the
-unannounced Day-2 endpoint remains unproven. Broad callback exception/cancellation
-behavior remains the inherited harness's responsibility until inspected and tested.
+Known limits to investigate: shell execution is synchronous and output is captured before
+the 12,000-character model excerpt; normal Brain has no persistent work queue, durable
+progress memory, resource scheduler, transient model retry or quiet-stall watchdog.
+Restart-safe cost reservations exist, but restart-safe challenge dedupe/recovery does not.
+Day-2 request compatibility remains provider-dependent. Broad callback exception and
+cancellation behavior remains the inherited harness's responsibility.
 
 ## Context management
 
