@@ -10,9 +10,9 @@ results. It contains no credentials, flags, or raw run output.
 - Organiser base: `registry.in-cypher.com:5001/base/agent-base:latest` at
   `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
 - First submitted derived image: `sha256:aa19961428f1cf24a654ddb5ec89fab924c1bcbe77f7978654c31a42cb5ddbca`.
-- Current one-challenge validation release:
+- Arena-validated one-challenge release:
   `sha256:5083e3f7563ca307ffbaa072f643343ed706968dd54a683c315e4db4366c70fe`.
-- Locally checked normal-selection rollback candidate:
+- Current normal-selection release:
   `sha256:75fc11358fc236c505026288dea5b3b2f0d2cf07e182a6a9f53db7dff28523e3`.
 - Platform/size: Linux AMD64, approximately 283 MB.
 - Start command: `/opt/agent/entrypoint.sh`, which normally execs inherited `main.py`.
@@ -129,9 +129,11 @@ writer is authoritative; extensions must not create a competing writer.
    memory, PID, capability, and read-only-root limits. The official harness reported 1/1 solved,
    three steps in 8.6 seconds, a real `already_solved` submission verdict, and valid final results.
    This is submission-path evidence, not fresh acceptance evidence.
-5. **Arena validation image** is queued for the next cycle. An `already_solved` result proves that
-   the arena executed the complete model-to-submission path; only a new `status: correct` would
-   additionally prove fresh acceptance.
+5. **Arena validation result** reported `done`, 1/1 solved, and zero penalty for the exact
+   validation release. Together with its token-backed result, this proves the arena executed the
+   model-to-submission path and retained valid output. It does not prove a fresh `status: correct`:
+   every visible challenge was already solved. The registry was then restored to the checked
+   normal-selection release above.
 
 The inspected checker has SHA-256
 `c50ca1f8f0db895a4118fff9b87d48fd9911bebf1cb6537e8cd3bb305783c544`.
