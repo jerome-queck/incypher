@@ -150,6 +150,14 @@ work is frozen; only small verified configuration fixes remain in scope.
 The 15/15 target and independent current-solver acceptance across all 15
 remain unproven, so this build goal is not complete. The checked #28 Day-1
 image remains published and the clean Day-2 image stays local, not submitted.
+At 06:34:53, the public [runtime dashboard](https://hackathonlive.in-cypher.com/dashboard)
+reported Team 63's `agent-63` container started at 06:15:05, the first cycle
+after push #28, with the `team-63/agent:latest` image tag, 2 allotted CPUs
+and about 43 MB used. This strongly supports replacement pickup, but the
+feed omits a content digest; exact #28 execution remains an inference. The
+06:35 board still showed RUNNING, 11/15, 2,250 VALID, rank 3, penalty 0;
+provider-key aggregate usage was USD4.39010870/20 at 06:33. The dashboard
+sample alone cannot establish active solving or a new acceptance.
 
 ## Evidence and release identity
 
@@ -351,10 +359,11 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #28 without manual solving.** Check the following public
-   status/scores cycles; distinguish registration,
-   active-image pickup, VALID solves and penalties. Its registry digest is
-   proven; the board does not identify the active digest. Do not request an
+1. **Monitor push #28 without manual solving.** Check public status/scores
+   each five-minute cycle and the Team 63 dashboard process if needed;
+   distinguish a new container, exact digest, VALID solves and penalties.
+   The registry digest is proven and the dashboard start time supports pickup,
+   but neither public feed exposes the active digest. Do not request an
    organiser rerun or blindly push another unchanged runtime.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
    controls active. Test a measurable capability improvement before any further
