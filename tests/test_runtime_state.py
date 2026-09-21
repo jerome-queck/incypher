@@ -211,7 +211,7 @@ class RuntimeStateTests(unittest.TestCase):
         first = self.store.rank(briefs, now=10.5)
         second = self.store.rank(briefs, now=10.5)
         self.assertEqual(first, second)
-        self.assertEqual([item.brief.challenge_id for item in first], [4, 3, 2, 1])
+        self.assertEqual([item.brief.challenge_id for item in first], [3, 4, 2, 1])
         self.assertFalse(first[2].eligible)
         self.store.checkpoint_outcome(briefs[1].scope, AttemptOutcome.TIMEOUT, now=12)
         self.assertEqual(self.store.rank(briefs, now=12)[2].backoff_seconds, 2)
@@ -229,15 +229,24 @@ class RuntimeStateTests(unittest.TestCase):
         ordered = self.store.rank_briefs(briefs, now=10.5)
         self.assertIs(ordered[-1], briefs[1])
 
-    def test_catalogue_crowd_solves_adds_small_capped_ranking_bonus(self):
+    def test_catalogue_crowd_solves_prioritize_likely_easy_work(self):
         briefs = [
             {"id": 1, "points": 100, "type": "standard", "solves": 1},
             {"id": 2, "points": 110, "type": "standard", "solve_count": 0},
             {"id": 3, "points": 0, "type": "standard", "solves": 10_000},
         ]
         ordered = self.store.rank_briefs(briefs, now=10)
-        self.assertEqual([brief["id"] for brief in ordered], [1, 2, 3])
-        self.assertIs(ordered[0], briefs[0])
+        self.assertEqual([brief["id"] for brief in ordered], [3, 1, 2])
+        self.assertIs(ordered[0], briefs[2])
+
+    def test_unsolved_high_value_work_cannot_monopolize_later_passes(self):
+        briefs = [
+            {"id": 1, "points": 500, "type": "standard", "solves": 0},
+            {"id": 2, "points": 100, "type": "standard", "solves": 0},
+        ]
+        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 1)
+        self.store.record_challenge_outcome(1, False, 1, "unsolved", now=10)
+        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 2)
 
     def test_catalogue_crowd_solves_ignores_absent_or_malformed_values(self):
         briefs = [

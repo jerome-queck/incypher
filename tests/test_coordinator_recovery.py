@@ -621,7 +621,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [41, 41, 42])
+        self.assertEqual(attempted, [41, 42, 41])
 
     def test_malformed_provider_message_requeues_and_later_work_continues(self):
         challenges = [
@@ -659,7 +659,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [43, 43, 44])
+        self.assertEqual(attempted, [43, 44, 43])
 
     def test_crashed_slices_do_not_shrink_later_configured_slice_budget(self):
         challenges = [{
@@ -736,7 +736,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [51, 51, 52])
+        self.assertEqual(attempted, [51, 52, 51])
 
     def test_raised_submission_callback_requeues_and_later_work_continues(self):
         challenges = [
@@ -782,7 +782,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [53, 53, 54])
+        self.assertEqual(attempted, [53, 54, 53])
 
     def test_deadline_is_hard_but_slice_count_does_not_abandon_unsolved_work(self):
         self.assertEqual(arena_main._MAX_RUN_SECONDS, 86_400)

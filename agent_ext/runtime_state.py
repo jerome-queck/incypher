@@ -35,7 +35,6 @@ MAX_SUMMARY_BYTES = 512
 MAX_SCOPE_OBSERVATIONS = 256
 MAX_TOTAL_OBSERVATIONS = 4096
 _MAX_CHALLENGES = 4096
-_CROWD_SOLVE_BONUS_PER_SOLVE = 20
 _CROWD_SOLVE_COUNT_CAP = 5
 _HASH_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _SECRET_PATTERNS = (
@@ -460,13 +459,10 @@ class RuntimeState:
             item_key = (
                 solved,
                 not eligible,
-                -(
-                    brief.points
-                    + _CROWD_SOLVE_BONUS_PER_SOLVE
-                    * min(brief.crowd_solves, _CROWD_SOLVE_COUNT_CAP)
-                ),
-                -progress,
                 attempts,
+                -min(brief.crowd_solves, _CROWD_SOLVE_COUNT_CAP),
+                -progress,
+                -brief.points,
                 brief.kind is ChallengeKind.DYNAMIC,
                 last_attempt,
                 brief.challenge_id,
