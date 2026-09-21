@@ -62,6 +62,12 @@ class EntrypointEnvironmentTests(unittest.TestCase):
             "https://runtime.example/v1|runtime-model|runtime-key",
         )
 
+    def test_explicit_blank_runtime_does_not_load_a_different_provider(self):
+        for runtime in ({"LLM_BASE_URL": ""}, {"LLM_MODEL": ""}, {"LLM_API_KEY": ""},
+                        {"LLM_BASE_URL": "", "LLM_MODEL": "", "LLM_API_KEY": ""}):
+            with self.subTest(keys=tuple(runtime)):
+                self.assertEqual(self.run_entrypoint(runtime), "||")
+
     def test_every_partial_runtime_configuration_is_not_mixed_with_fallback(self):
         values = {
             "LLM_BASE_URL": "https://runtime.example/v1",

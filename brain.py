@@ -82,6 +82,9 @@ class Brain:
         response.raise_for_status()
         return response.json()["choices"][0]["message"]
 
+    def _invalid_tool_arguments(self, name):
+        """Allow admitted adapters to classify a rejected request before repair."""
+
     def _submit(self, flag: str, step: int):
         if self.submissions >= self.max_submissions:
             self._log("[step %d] submission budget exhausted" % step)
@@ -89,12 +92,16 @@ class Brain:
                     "error": "submission budget exhausted"}
         self.submissions += 1
         verdict = self.submit_flag(flag)
-        status = (verdict or {}).get("status")
+        status = verdict.get("status") if isinstance(verdict, dict) else None
+        if not isinstance(status, str):
+            status = "uncertain"
+        if status not in ("correct", "incorrect", "already_solved", "ratelimited", "error"):
+            status = "uncertain"
         self._log("[step %d] SUBMIT [flag redacted] -> %s" % (step, status))
         if status in ("correct", "already_solved"):
             return {"solved": True, "steps": step, "flag": flag, "verdict": verdict}
-        if status in ("ratelimited", "error"):
-            return {"solved": False, "steps": step, "verdict": verdict,
+        if status in ("ratelimited", "error", "uncertain"):
+            return {"solved": False, "steps": step, "verdict": {"status": status},
                     "error": "submission unavailable: %s" % status}
         return None
 
@@ -109,10 +116,20 @@ class Brain:
                 message = self._chat(messages)
             except Exception as exc:  # noqa: BLE001 - failure is part of the result contract
                 return {"solved": False, "steps": steps,
-                        "error": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+                        "error": "%s: model request failed" % type(exc).__name__}
 
-            tool_calls = message.get("tool_calls") or []
-            content = message.get("content") or ""
+            if not isinstance(message, dict):
+                return {"solved": False, "steps": steps, "error": "malformed model message"}
+            tool_calls = message.get("tool_calls")
+            tool_calls = [] if tool_calls is None else tool_calls
+            content = message.get("content")
+            content = "" if content is None else content
+            if (not isinstance(content, str) or not isinstance(tool_calls, list)
+                    or any(not isinstance(call, dict)
+                           or not isinstance(call.get("function"), dict)
+                           or not isinstance(call["function"].get("name"), str)
+                           for call in tool_calls)):
+                return {"solved": False, "steps": steps, "error": "malformed model message"}
             assistant_turn = {"role": "assistant", "content": content}
             if tool_calls:
                 assistant_turn["tool_calls"] = tool_calls
@@ -123,6 +140,8 @@ class Brain:
                 # when tools were requested. Treat that as a submission, not an unsolved stop.
                 candidates = [flag for flag in FLAG_RE.findall(content) if flag not in submitted]
                 for flag in candidates:
+                    if flag in submitted:
+                        continue
                     submitted.add(flag)
                     result = self._submit(flag, steps)
                     if result:
@@ -136,7 +155,17 @@ class Brain:
                 try:
                     arguments = json.loads(function.get("arguments") or "{}")
                 except Exception:  # noqa: BLE001 - malformed tool arguments go back to model
-                    arguments = {}
+                    arguments = None
+
+                argument_name = {"run_bash": "command", "submit_flag": "flag"}.get(name)
+                if (not isinstance(arguments, dict)
+                        or (argument_name is not None
+                            and (not isinstance(arguments.get(argument_name), str)
+                                 or not arguments[argument_name].strip()))):
+                    self._invalid_tool_arguments(name)
+                    messages.append({"role": "tool", "tool_call_id": tool_call.get("id"),
+                                     "content": "Invalid tool arguments; supply a nonempty string field."})
+                    continue
 
                 if name == "run_bash":
                     command = arguments.get("command", "")
@@ -146,6 +175,10 @@ class Brain:
                                      "content": (output or "")[:12000]})
                 elif name == "submit_flag":
                     flag = arguments.get("flag", "")
+                    if flag in submitted:
+                        messages.append({"role": "tool", "tool_call_id": tool_call.get("id"),
+                                         "content": "Candidate already submitted; use new evidence."})
+                        continue
                     submitted.add(flag)
                     result = self._submit(flag, steps)
                     if result:

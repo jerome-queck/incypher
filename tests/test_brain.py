@@ -147,6 +147,13 @@ class BrainTests(unittest.TestCase):
         agent.s.post.assert_not_called()
         self.assertEqual(submitted, [])
 
+    def test_model_exception_details_are_not_projected_to_results(self):
+        agent = brain.Brain(Mock(), Mock(), verbose=False)
+        with patch.object(agent, '_chat', side_effect=RuntimeError('synthetic-provider-secret')):
+            result = agent.solve('sample')
+        self.assertEqual(result['error'], 'RuntimeError: model request failed')
+        self.assertNotIn('synthetic-provider-secret', str(result))
+
     def test_malformed_tool_arguments_do_not_crash_loop(self):
         commands = []
         replies = [
@@ -165,7 +172,7 @@ class BrainTests(unittest.TestCase):
         result = agent.solve("sample")
 
         self.assertFalse(result["solved"])
-        self.assertEqual(commands, [""])
+        self.assertEqual(commands, [])
         self.assertEqual(result["final"], "No supported result.")
 
     def test_redacts_flags_from_logs(self):
@@ -193,6 +200,63 @@ class BrainTests(unittest.TestCase):
         self.assertNotIn(candidate, output.getvalue())
         self.assertIn("[flag redacted]", output.getvalue())
         self.assertEqual(submitted, [candidate])
+
+    def test_nonobject_arguments_and_wrong_field_types_never_dispatch(self):
+        for name, field in (("run_bash", "command"), ("submit_flag", "flag")):
+            for args in ([], None, 42, "text", {field: []}, {field: ""}):
+                with self.subTest(name=name, args=args):
+                    command, submit = Mock(), Mock()
+                    agent = ScriptedBrain([
+                        {"tool_calls": [{"id": "bad", "function": {
+                            "name": name, "arguments": json.dumps(args)}}]},
+                        {"content": "No supported result."},
+                    ], run_bash=command, submit_flag=submit, verbose=False)
+                    self.assertFalse(agent.solve("sample")["solved"])
+                    command.assert_not_called()
+                    submit.assert_not_called()
+
+    def test_duplicate_tool_candidate_does_not_spend_submission_budget(self):
+        candidate = "INCYPHER" + "{duplicate-test}"
+        reply = {"tool_calls": [{"id": "submit", "function": {
+            "name": "submit_flag", "arguments": json.dumps({"flag": candidate})}}]}
+        submit = Mock(return_value={"status": "incorrect"})
+        agent = ScriptedBrain([reply, reply, {"content": candidate}],
+                              run_bash=Mock(), submit_flag=submit, verbose=False)
+        self.assertFalse(agent.solve("sample")["solved"])
+        submit.assert_called_once_with(candidate)
+        self.assertEqual(agent.submissions, 1)
+
+    def test_duplicate_text_candidates_submit_once(self):
+        candidate = "INCYPHER" + "{duplicate-text}"
+        submit = Mock(return_value={"status": "incorrect"})
+        agent = ScriptedBrain([{"content": candidate + " " + candidate}],
+                              run_bash=Mock(), submit_flag=submit, verbose=False)
+        self.assertFalse(agent.solve("sample")["solved"])
+        submit.assert_called_once_with(candidate)
+
+    def test_unknown_or_malformed_verdict_stops_before_second_candidate(self):
+        for verdict in (None, [], "correct", {}, {"status": []}, {"status": "unexpected"}):
+            with self.subTest(verdict=verdict):
+                submit = Mock(return_value=verdict)
+                agent = ScriptedBrain([{
+                    "content": "INCYPHER{synthetic-one} INCYPHER{synthetic-two}",
+                }], run_bash=Mock(), submit_flag=submit, verbose=False)
+                result = agent.solve("sample")
+                self.assertFalse(result["solved"])
+                self.assertEqual(result["error"], "submission unavailable: uncertain")
+                submit.assert_called_once_with("INCYPHER{synthetic-one}")
+
+    def test_malformed_model_messages_return_failure_without_dispatch(self):
+        for reply in ([], None, {"content": []}, {"tool_calls": {}},
+                      {"tool_calls": [None]}, {"tool_calls": [{"function": []}]},
+                      {"tool_calls": [{"function": {"name": []}}]}):
+            with self.subTest(reply=reply):
+                command, submit = Mock(), Mock()
+                agent = ScriptedBrain([reply], run_bash=command, submit_flag=submit,
+                                      verbose=False)
+                self.assertEqual(agent.solve("sample")["error"], "malformed model message")
+                command.assert_not_called()
+                submit.assert_not_called()
 
 
 if __name__ == "__main__":
