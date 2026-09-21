@@ -158,6 +158,12 @@ feed omits a content digest; exact #28 execution remains an inference. The
 06:35 board still showed RUNNING, 11/15, 2,250 VALID, rank 3, penalty 0;
 provider-key aggregate usage was USD4.39010870/20 at 06:33. The dashboard
 sample alone cannot establish active solving or a new acceptance.
+At 06:41 the dashboard showed Team 63's agent using CPU with exactly one
+dynamic challenge environment, opened at 06:40:59; by 06:43 that environment
+was gone and the agent was still using CPU. These read-only samples support
+an active, serial attempt/release lifecycle, not a solved challenge or exact
+image digest. The 06:45 public cycle stayed RUNNING at 11/15, 2,250 VALID,
+rank 3 and penalty 0. Do not interrupt the live instance on a flat score.
 
 ## Evidence and release identity
 
@@ -364,7 +370,8 @@ holds detailed cost, experiment and provenance records. Current priorities:
    distinguish a new container, exact digest, VALID solves and penalties.
    The registry digest is proven and the dashboard start time supports pickup,
    but neither public feed exposes the active digest. Do not request an
-   organiser rerun or blindly push another unchanged runtime.
+   organiser rerun or blindly push another unchanged runtime; one live
+   dynamic attempt was observed opening and closing after push #28.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
    controls active. Test a measurable capability improvement before any further
    replacement; retain the proven #20 image for a hard failure, not a flat score.
