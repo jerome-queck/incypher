@@ -233,6 +233,14 @@ class LedgerTests(unittest.TestCase):
         self.assertIsNone(response.usage.cost)
         self.assertEqual(response.usage.cost_provenance, CostProvenance.UNKNOWN)
 
+    def test_oversized_integer_provider_cost_is_unknown_without_conversion_error(self):
+        response = normalize_response({
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"cost": 10**5000},
+        })
+        self.assertIsNone(response.usage.cost)
+        self.assertEqual(response.usage.cost_provenance, CostProvenance.UNKNOWN)
+
     def test_estimate_can_be_replaced_by_late_measurement(self):
         self.ledger.reserve("estimated", "5")
         self.ledger.settle(

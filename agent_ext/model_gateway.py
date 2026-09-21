@@ -181,7 +181,16 @@ def _nonnegative_int(value: Any) -> int | None:
 def _money(value: Any) -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
-    serialized = str(value)
+    if type(value) not in {str, int, float, Decimal}:
+        return None
+    # Avoid invoking arbitrary __str__ methods and reject obviously oversized
+    # integers before Python's configurable integer-to-string conversion limit.
+    if type(value) is int and value.bit_length() > 220:
+        return None
+    try:
+        serialized = str(value)
+    except (ValueError, OverflowError):
+        return None
     if len(serialized) > _MAX_DECIMAL_CHARACTERS:
         return None
     try:
