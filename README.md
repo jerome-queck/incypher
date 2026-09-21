@@ -60,6 +60,20 @@ by `entrypoint.sh`; it is absent from Git, build arguments, Docker config metada
 that image only to the official team registry. Ordinary/day-2 builds omit both flags and contain no
 embedded model credential because the arena injects the runtime values.
 
+For the day-1 platform proof only, force the official harness to attempt one authorised practice
+challenge that it would normally filter out:
+
+```sh
+docker build --no-cache --platform linux/amd64 --provenance=false \
+  --build-arg INCLUDE_DAY1_LLM=1 \
+  --build-arg VALIDATION_CHALLENGE_ID=94 \
+  --secret id=day1_llm,src=/path/to/day1-llm.env \
+  -t incypher-agent:validation .
+```
+
+This mode changes only challenge selection: solving, submission, and results remain owned by the
+official harness. Omit `VALIDATION_CHALLENGE_ID` for normal competition images.
+
 ## Submit
 
 ```sh

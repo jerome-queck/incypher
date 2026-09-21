@@ -10,9 +10,10 @@ results. It contains no credentials, flags, or raw run output.
 - Organiser base: `registry.in-cypher.com:5001/base/agent-base:latest` at
   `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
 - First submitted derived image: `sha256:aa19961428f1cf24a654ddb5ec89fab924c1bcbe77f7978654c31a42cb5ddbca`.
-- Current private day-1 release: `sha256:1f3fb5403a884d1466efaff8fee902e62caa22948f03d94f07da86a936aca997`.
+- Current one-challenge validation release:
+  `sha256:5083e3f7563ca307ffbaa072f643343ed706968dd54a683c315e4db4366c70fe`.
 - Platform/size: Linux AMD64, approximately 283 MB.
-- Inherited start command: `python /opt/agent/main.py`.
+- Start command: `/opt/agent/entrypoint.sh`, which normally execs inherited `main.py`.
 
 The base remains referenced by its required `:latest` tag. The digest above records what was
 actually tested; it is not a silent Dockerfile pin.
@@ -71,6 +72,11 @@ the process environment. The value is absent from Git, build arguments, Docker c
 and logs. `INCLUDE_DAY1_LLM=1` separates this cache path from ordinary/day-2 builds. The file is
 never used for platform credentials and the image is pushed only to the official team registry.
 
+`VALIDATION_CHALLENGE_ID=94` enables a temporary, one-challenge proof mode. The entrypoint invokes
+`validation_main.py`, which sets the inherited `ONLY_IDS` selector and bypasses only the inherited
+practice-category filter. The official enumeration, solver, submission callback, and results writer
+remain unchanged. Omit the argument for normal arena behavior.
+
 ## Result shape
 
 The final inherited writer emits this shape. Values below are synthetic:
@@ -119,8 +125,9 @@ writer is authoritative; extensions must not create a competing writer.
 3. **Structural checker** proves AMD64/startup/sandbox behavior, not solving.
 4. **Token-backed retry** proved autonomous commands and real submission calls on an
    already-solved practice challenge. It is not fresh acceptance evidence.
-5. **Arena result** remains pending. Only a new `status: correct` plus a valid retained results
-   file proves the tracer-bullet goal.
+5. **Arena validation image** is queued for the next cycle. An `already_solved` result proves that
+   the arena executed the complete model-to-submission path; only a new `status: correct` would
+   additionally prove fresh acceptance.
 
 The inspected checker has SHA-256
 `c50ca1f8f0db895a4118fff9b87d48fd9911bebf1cb6537e8cd3bb305783c544`.
