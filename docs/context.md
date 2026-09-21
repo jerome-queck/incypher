@@ -37,7 +37,7 @@ outside explicit validation images.
 
 ## Evidence and release identity
 
-- Public boards at **21 Sep 21:49 SGT**: rank 8, VALID 650, SCORE 650, five solves;
+- Public boards at **21 Sep 23:30 SGT**: rank 10, VALID 650, SCORE 650, five solves;
   status 5/15, 12 pushes, last push 17:43:14, `done`, penalty 0. This is Day-1 evidence,
   not final competition score. Read `/scores` and `/status` again for current values.
 - Source docs previously called an older digest “current.” That is historical evidence
@@ -92,6 +92,14 @@ outside explicit validation images.
   in 12.085s: three Luna/high calls, two tools, one correct in-process submission,
   USD 0.0009127 measured and zero unresolved; scoped memory was 2 records/139 bytes.
   This is synthetic capability/plumbing evidence, not practice or arena acceptance.
+- Initial independent PR3 review found missing `is_practice` drift validation, an
+  overbroad crash catch, duplicated shell-status policy, non-durable in-flight progress,
+  and missing integrated async/quiet acceptance coverage. Fix runtime head `671cffd`
+  resolves those findings and passes 300 macOS tests with 25 expected platform skips.
+  Exact AMD64 image `sha256:81cb0cbd4e5bd94c61ebf4d649ea3f128ac83b3593bd259f4dc64382189f3c0b`
+  is 284,031,481 bytes; checker 6/0/2 expected warnings, all official AST guards,
+  imports and clean Day-2 config passed. Sixty-seven focused Linux tests passed with
+  ResourceWarnings fatal. Independent re-review remains required before merge.
 
 ## Next work, in order
 
@@ -101,7 +109,7 @@ The brief owns this session's goals, deadlines, delegation and Day-1 release aut
 its research records the audited starting gaps. Private progress lives under ignored
 `private/solver-build-20260921/`. Architecture and PR ordering remain build-session
 decisions. The prompt-authoring pass changed documentation only; solver readiness is
-unchanged. A 21 Sep ~21:29 SGT public-board refresh still showed 5/15, VALID/SCORE 650,
+unchanged. A 21 Sep 23:30 SGT public-board refresh still showed 5/15, VALID/SCORE 650,
 12 pushes, `done`, penalty 0. No paid request or arena release was made by that pass.
 
 The ordered technical gates below are current after PR3 implementation.
