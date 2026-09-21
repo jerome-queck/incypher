@@ -19,6 +19,16 @@ class ScriptedBrain(brain.Brain):
         return next(self.replies)
 
 
+class CapturingBrain(ScriptedBrain):
+    def __init__(self, replies, *args, **kwargs):
+        super().__init__(replies, *args, **kwargs)
+        self.requests = []
+
+    def _chat(self, messages):
+        self.requests.append(json.loads(json.dumps(messages)))
+        return super()._chat(messages)
+
+
 class FailingBrain(brain.Brain):
     def _chat(self, messages):
         raise TimeoutError("synthetic timeout")
@@ -144,6 +154,43 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(result["steps"], 2)
         self.assertEqual(commands, ["inspect synthetic material"])
         self.assertEqual(submitted, [candidate])
+
+    def test_reasoning_details_round_trip_unchanged_after_tool_call(self):
+        details = [{"type": "reasoning.summary", "id": "synthetic", "data": "opaque"}]
+        replies = [
+            {"content": "", "reasoning_details": details, "tool_calls": [{
+                "id": "inspect", "function": {
+                    "name": "run_bash", "arguments": json.dumps({"command": "inspect"}),
+                },
+            }]},
+            {"content": "done"},
+        ]
+        agent = CapturingBrain(
+            replies, run_bash=Mock(return_value="evidence"), submit_flag=Mock(), verbose=False
+        )
+
+        agent.solve("synthetic challenge")
+
+        assistant_turn = agent.requests[1][-2]
+        self.assertEqual(assistant_turn["reasoning_details"], details)
+        self.assertEqual(assistant_turn["tool_calls"], replies[0]["tool_calls"])
+
+    def test_oversized_reasoning_details_are_rejected(self):
+        replies = [{
+            "content": "",
+            "reasoning_details": [{"data": "x" * (brain._MAX_REASONING_DETAILS_BYTES + 1)}],
+            "tool_calls": [{"id": "inspect", "function": {
+                "name": "run_bash", "arguments": json.dumps({"command": "inspect"}),
+            }}],
+        }]
+        agent = ScriptedBrain(
+            replies, run_bash=Mock(), submit_flag=Mock(), verbose=False
+        )
+
+        result = agent.solve("synthetic challenge")
+
+        self.assertEqual(result["error"], "malformed model message")
+        agent.run_bash.assert_not_called()
 
     def test_submits_flag_returned_as_text(self):
         candidate = "INCYPHER" + "{unit-test-only}"

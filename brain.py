@@ -61,6 +61,7 @@ candidate requires new evidence; an unavailable/uncertain verdict is terminal. I
 state the missing fact and spend the next call on a different bounded experiment."""
 
 _MAX_CONTEXT_BYTES = 48 * 1024
+_MAX_REASONING_DETAILS_BYTES = 16 * 1024
 _DISCOVERY_CACHE = DiscoveryCache()
 
 
@@ -85,6 +86,26 @@ def _bounded_messages(messages):
 
 def _redact(text: str) -> str:
     return FLAG_RE.sub("[flag redacted]", text)
+
+
+def _assistant_turn(message: dict, content: str, tool_calls: list) -> dict | None:
+    turn = {"role": "assistant", "content": content}
+    if tool_calls:
+        turn["tool_calls"] = tool_calls
+    reasoning_details = message.get("reasoning_details")
+    if reasoning_details is not None:
+        if not isinstance(reasoning_details, list):
+            return None
+        try:
+            encoded = json.dumps(
+                reasoning_details, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return None
+        if len(encoded) > _MAX_REASONING_DETAILS_BYTES:
+            return None
+        turn["reasoning_details"] = reasoning_details
+    return turn
 
 
 class Brain:
@@ -262,9 +283,10 @@ class Brain:
                            or not isinstance(call["function"].get("name"), str)
                            for call in tool_calls)):
                 return {"solved": False, "steps": steps, "error": "malformed model message"}
-            assistant_turn = {"role": "assistant", "content": content}
-            if tool_calls:
-                assistant_turn["tool_calls"] = tool_calls
+            assistant_turn = _assistant_turn(message, content, tool_calls)
+            if assistant_turn is None:
+                return {"solved": False, "steps": steps,
+                        "error": "malformed model message"}
             messages.append(assistant_turn)
 
             if not tool_calls:
