@@ -41,8 +41,13 @@ raw provider exception text leaking into results. The optional bridge retains it
   the official base is not cached on this machine. Current base drift remains unknown.
 - This pass creates a Git PR and merge, not a registry release. No practice challenge,
   flag submission, paid API call or organiser restart was performed by this audit.
-- `.venv` is installed locally; `.env` exists with private permissions and blank credential fields. Fill them
-  on each machine; Codex CLI here reports ChatGPT login. No account token was exported.
+- `.venv` is installed locally. The ignored mode-0600 `.env` is populated on this machine
+  with Team 63 platform configuration and the Day-1 provider triplet migrated from the
+  prior private files. `doctor` reports every required field set, registry login succeeds,
+  and Codex CLI reports ChatGPT login. No value or account token was logged or committed.
+- This setup refresh did not build, check, practice with, or push an arena image. The next
+  release action is an explicit Day-1 build followed by the exact-image checker and a
+  separately requested registry push.
 - Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
   Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
   macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,
