@@ -37,6 +37,7 @@ _OFFICIAL_AST = {
     "catalogue": "40a1220cf274ee54b0c3aa77a7504fae77256d496c778fd43c646c3815f74ba2",
     "detail": "a04d71af3e0fa8eab901da59d5a009fc75937e899dd9ff749e2b7b539fa4f6fe",
     "is_practice": "d6e6b7c08dbe14b5094e557787c911c792e488ba163fbb11f10f36772371aa05",
+    "client_init": "40b975045df8353cd811139e3fdd9266f976daa68c416e7a0db5a5aa92552b2c",
 }
 
 
@@ -281,6 +282,10 @@ def main():
     _require_signature(inherited_solve, ("client", "ch", "max_steps"), "solve-challenge")
     inherited_client = getattr(official_main, "CTFdClient", None)
     _require_signature(inherited_client, ("base", "token"), "client-constructor")
+    inherited_client_init = getattr(inherited_client, "__init__", None)
+    _require_signature(
+        inherited_client_init, ("self", "base", "token"), "client-constructor-init"
+    )
     _require_signature(
         getattr(inherited_client, "list_challenges", None),
         ("self",),
@@ -303,6 +308,9 @@ def main():
     if getattr(official_main, "__file__", None):
         _require_ast(
             inherited_is_practice, _OFFICIAL_AST["is_practice"], "practice-selection"
+        )
+        _require_ast(
+            inherited_client_init, _OFFICIAL_AST["client_init"], "client-constructor"
         )
         _require_ast(inherited_solve, _OFFICIAL_AST["solve"], "solve-challenge")
         _require_ast(inherited_build_prompt, _OFFICIAL_AST["prompt"], "prompt-construction")

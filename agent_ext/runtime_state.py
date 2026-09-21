@@ -328,6 +328,41 @@ class RuntimeState:
             pass
 
     @staticmethod
+    def _write_challenge_state(
+        connection: sqlite3.Connection,
+        scope: Scope,
+        *,
+        attempts: int,
+        progress: int,
+        failure_streak: int,
+        last_outcome: str,
+        solved: int,
+        backoff_until: float,
+        last_attempt_at: float,
+        updated_at: float,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO challenge_state(
+                scope_key, challenge_id, material_hash, challenge_kind,
+                instance_hash, attempts, progress, failure_streak,
+                last_outcome, solved, backoff_until, last_attempt_at, updated_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                scope.key, scope.challenge_id, scope.material_hash, scope.kind.value,
+                scope.instance_hash, attempts, progress, failure_streak, last_outcome,
+                solved, backoff_until, last_attempt_at, updated_at,
+            ),
+        )
+        connection.execute(
+            """DELETE FROM challenge_state WHERE scope_key NOT IN
+               (SELECT scope_key FROM challenge_state
+                ORDER BY updated_at DESC, scope_key DESC LIMIT ?)""",
+            (_MAX_CHALLENGES,),
+        )
+
+    @staticmethod
     def _valid_state_row(row: sqlite3.Row, scope: Scope) -> bool:
         try:
             return (
@@ -505,25 +540,17 @@ class RuntimeState:
                     row["attempts"], row["failure_streak"], row["last_outcome"],
                     row["solved"], row["backoff_until"], row["last_attempt_at"],
                 ) if valid else (0, 0, AttemptOutcome.UNSOLVED.value, 0, 0.0, 0.0)
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO challenge_state(
-                        scope_key, challenge_id, material_hash, challenge_kind,
-                        instance_hash, attempts, progress, failure_streak,
-                        last_outcome, solved, backoff_until, last_attempt_at, updated_at
-                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        scope.key, scope.challenge_id, scope.material_hash, scope.kind.value,
-                        scope.instance_hash, values[0], progress, values[1], values[2],
-                        values[3], values[4], values[5], instant,
-                    ),
-                )
-                connection.execute(
-                    """DELETE FROM challenge_state WHERE scope_key NOT IN
-                       (SELECT scope_key FROM challenge_state
-                        ORDER BY updated_at DESC, scope_key DESC LIMIT ?)""",
-                    (_MAX_CHALLENGES,),
+                self._write_challenge_state(
+                    connection,
+                    scope,
+                    attempts=values[0],
+                    progress=progress,
+                    failure_streak=values[1],
+                    last_outcome=values[2],
+                    solved=values[3],
+                    backoff_until=values[4],
+                    last_attempt_at=values[5],
+                    updated_at=instant,
                 )
                 self._commit(connection, "checkpoint_progress")
                 return progress
@@ -573,25 +600,17 @@ class RuntimeState:
                     else min((row["failure_streak"] if valid else 0) + 1, 1_000_000)
                 )
                 delay = 0.0 if solved else float(min(streak, 2))
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO challenge_state(
-                        scope_key, challenge_id, material_hash, challenge_kind,
-                        instance_hash, attempts, progress, failure_streak,
-                        last_outcome, solved, backoff_until, last_attempt_at, updated_at
-                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        scope.key, scope.challenge_id, scope.material_hash, scope.kind.value,
-                        scope.instance_hash, attempts, progress, streak, outcome.value,
-                        int(solved), instant + delay, instant, instant,
-                    ),
-                )
-                connection.execute(
-                    """DELETE FROM challenge_state WHERE scope_key NOT IN
-                       (SELECT scope_key FROM challenge_state
-                        ORDER BY updated_at DESC, scope_key DESC LIMIT ?)""",
-                    (_MAX_CHALLENGES,),
+                self._write_challenge_state(
+                    connection,
+                    scope,
+                    attempts=attempts,
+                    progress=progress,
+                    failure_streak=streak,
+                    last_outcome=outcome.value,
+                    solved=int(solved),
+                    backoff_until=instant + delay,
+                    last_attempt_at=instant,
+                    updated_at=instant,
                 )
                 self._commit(connection, "checkpoint_outcome")
         except RuntimeStateError:
