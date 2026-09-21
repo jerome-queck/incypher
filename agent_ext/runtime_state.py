@@ -36,6 +36,7 @@ MAX_SUMMARY_BYTES = 512
 MAX_SCOPE_OBSERVATIONS = 256
 MAX_TOTAL_OBSERVATIONS = 4096
 _MAX_CHALLENGES = 4096
+_MAX_SUBMISSION_INTENTS = 4096
 _CROWD_SOLVE_COUNT_CAP = 5
 _SUBMISSION_RECONCILE_SECONDS = 300.0
 _HASH_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
@@ -320,11 +321,12 @@ class RuntimeState:
                         value TEXT NOT NULL
                     );
                     CREATE TABLE IF NOT EXISTS runtime_submission_intents (
-                        scope_key TEXT PRIMARY KEY,
+                        scope_key TEXT NOT NULL,
                         challenge_id INTEGER NOT NULL,
                         candidate_fp TEXT NOT NULL,
                         status TEXT NOT NULL,
-                        updated_at REAL NOT NULL
+                        updated_at REAL NOT NULL,
+                        PRIMARY KEY(scope_key, candidate_fp)
                     );
                     CREATE INDEX IF NOT EXISTS runtime_submission_challenge
                         ON runtime_submission_intents(challenge_id);
@@ -583,12 +585,16 @@ class RuntimeState:
         try:
             with closing(self._connect()) as connection:
                 row = connection.execute(
-                    "SELECT status FROM runtime_submission_intents WHERE scope_key = ?",
+                    """SELECT 1 FROM runtime_submission_intents
+                       WHERE scope_key = ? AND status IN (
+                           'dispatch_possible', 'uncertain', 'accepted',
+                           'already_solved', 'unavailable', 'conflict'
+                       ) LIMIT 1""",
                     (scope.key,),
                 ).fetchone()
         except sqlite3.Error as exc:
             raise RuntimeStateError("submission reconciliation read failed") from exc
-        return row is None or row["status"] == "reserved"
+        return row is None
 
     def reserve_submission(
         self,
@@ -596,8 +602,8 @@ class RuntimeState:
         candidate: str,
         *,
         now: float | None = None,
-    ) -> bool:
-        """Persist a candidate fingerprint before dispatch; block unresolved replay."""
+    ) -> str:
+        """Reserve one exact candidate, returning reserved/rejected/blocked."""
         scope = scope_from_context(context)
         if not isinstance(candidate, str) or not 1 <= len(candidate) <= 1024:
             raise ValueError("candidate must be bounded text")
@@ -608,13 +614,35 @@ class RuntimeState:
             with closing(self._connect()) as connection:
                 self._begin(connection)
                 fingerprint = self._submission_fingerprint(connection, scope, candidate)
-                row = connection.execute(
-                    "SELECT status FROM runtime_submission_intents WHERE scope_key = ?",
+                blocked = connection.execute(
+                    """SELECT 1 FROM runtime_submission_intents
+                       WHERE scope_key = ? AND status IN (
+                           'dispatch_possible', 'uncertain', 'accepted',
+                           'already_solved', 'unavailable', 'conflict'
+                       ) LIMIT 1""",
                     (scope.key,),
                 ).fetchone()
+                if blocked is not None:
+                    self._rollback(connection)
+                    return "blocked"
+                row = connection.execute(
+                    """SELECT status FROM runtime_submission_intents
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (scope.key, fingerprint),
+                ).fetchone()
+                if row is not None and row["status"] == "rejected":
+                    self._rollback(connection)
+                    return "rejected"
                 if row is not None and row["status"] != "reserved":
                     self._rollback(connection)
-                    return False
+                    return "blocked"
+                if row is None:
+                    count = connection.execute(
+                        "SELECT COUNT(*) AS count FROM runtime_submission_intents"
+                    ).fetchone()["count"]
+                    if count >= _MAX_SUBMISSION_INTENTS:
+                        self._rollback(connection)
+                        raise RuntimeStateError("submission intent capacity reached")
                 connection.execute(
                     """INSERT OR REPLACE INTO runtime_submission_intents(
                            scope_key, challenge_id, candidate_fp, status, updated_at
@@ -622,7 +650,7 @@ class RuntimeState:
                     (scope.key, scope.challenge_id, fingerprint, instant),
                 )
                 self._commit(connection, "reserve_submission")
-                return True
+                return "reserved"
         except RuntimeStateError:
             raise
         except sqlite3.Error as exc:
@@ -647,11 +675,11 @@ class RuntimeState:
                 self._begin(connection)
                 fingerprint = self._submission_fingerprint(connection, scope, candidate)
                 row = connection.execute(
-                    """SELECT candidate_fp, status FROM runtime_submission_intents
-                       WHERE scope_key = ?""",
-                    (scope.key,),
+                    """SELECT status FROM runtime_submission_intents
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (scope.key, fingerprint),
                 ).fetchone()
-                if row is None or row["candidate_fp"] != fingerprint:
+                if row is None:
                     self._rollback(connection)
                     raise RuntimeStateError("submission intent is unavailable")
                 if row["status"] != "reserved":
@@ -660,8 +688,8 @@ class RuntimeState:
                 connection.execute(
                     """UPDATE runtime_submission_intents
                        SET status = 'dispatch_possible', updated_at = ?
-                       WHERE scope_key = ?""",
-                    (instant, scope.key),
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (instant, scope.key, fingerprint),
                 )
                 self._commit(connection, "mark_submission_dispatch_possible")
                 return True
@@ -693,27 +721,44 @@ class RuntimeState:
                 self._begin(connection)
                 fingerprint = self._submission_fingerprint(connection, scope, candidate)
                 row = connection.execute(
-                    """SELECT candidate_fp, status FROM runtime_submission_intents
-                       WHERE scope_key = ?""",
-                    (scope.key,),
+                    """SELECT status FROM runtime_submission_intents
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (scope.key, fingerprint),
                 ).fetchone()
-                if row is None or row["candidate_fp"] != fingerprint:
+                if row is None:
                     self._rollback(connection)
                     raise RuntimeStateError("submission intent is unavailable")
-                if row["status"] not in {"dispatch_possible", "uncertain"}:
+                current = row["status"]
+                if current == "reserved":
                     self._rollback(connection)
                     raise RuntimeStateError("submission dispatch was not committed")
-                if status == "uncertain":
+                classified = {
+                    "correct": "accepted",
+                    "incorrect": "rejected",
+                    "already_solved": "already_solved",
+                    "ratelimited": "unavailable",
+                    "error": "unavailable",
+                    "uncertain": "uncertain",
+                }[status]
+                if current == "conflict":
+                    resolved = current
+                elif current in {"accepted", "rejected"}:
+                    if classified in {"accepted", "rejected"} and classified != current:
+                        resolved = "conflict"
+                    else:
+                        resolved = current
+                elif classified in {"accepted", "rejected"}:
+                    resolved = classified
+                elif current == "already_solved":
+                    resolved = current
+                else:
+                    resolved = classified
+                if resolved != current:
                     connection.execute(
                         """UPDATE runtime_submission_intents
-                           SET status = 'uncertain', updated_at = ?
-                           WHERE scope_key = ?""",
-                        (instant, scope.key),
-                    )
-                else:
-                    connection.execute(
-                        "DELETE FROM runtime_submission_intents WHERE scope_key = ?",
-                        (scope.key,),
+                           SET status = ?, updated_at = ?
+                           WHERE scope_key = ? AND candidate_fp = ?""",
+                        (resolved, instant, scope.key, fingerprint),
                     )
                 self._commit(connection, "reconcile_submission")
         except RuntimeStateError:
@@ -737,20 +782,23 @@ class RuntimeState:
             with closing(self._connect()) as connection:
                 self._begin(connection)
                 for row in connection.execute(
-                    "SELECT scope_key, challenge_id, updated_at "
-                    "FROM runtime_submission_intents "
-                    "WHERE status IN ('dispatch_possible', 'uncertain')"
+                    """SELECT scope_key, challenge_id, candidate_fp, status, updated_at
+                       FROM runtime_submission_intents"""
                 ):
                     challenge_id = row["challenge_id"]
                     if challenge_id not in solved:
                         continue
-                    if solved[challenge_id] or (
+                    stale_reconcilable = row["status"] in {
+                        "dispatch_possible", "uncertain", "already_solved", "unavailable",
+                    }
+                    if solved[challenge_id] or (stale_reconcilable and (
                         instant - float(row["updated_at"])
                         >= _SUBMISSION_RECONCILE_SECONDS
-                    ):
+                    )):
                         connection.execute(
-                            "DELETE FROM runtime_submission_intents WHERE scope_key = ?",
-                            (row["scope_key"],),
+                            """DELETE FROM runtime_submission_intents
+                               WHERE scope_key = ? AND candidate_fp = ?""",
+                            (row["scope_key"], row["candidate_fp"]),
                         )
                 self._commit(connection, "reconcile_submission_catalogue")
         except RuntimeStateError:

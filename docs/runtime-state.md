@@ -46,9 +46,13 @@ connections, credentials and candidate flags are not persisted.
   the exact material/instance scope. `mark_submission_dispatch_possible` durably crosses
   the effect boundary immediately before the trusted callback. A crash before that marker
   may resume; a crash after it requires reconciliation. `reconcile_submission` retains
-  uncertain effects; while one exists, that exact scope waits but the rest of the queue continues. A later trusted
-  catalogue refresh clears an accepted solve immediately or an unchanged unsolved state
-  after five minutes. Candidate text is never stored.
+  accepted/rejected terminal tombstones and represents contradictory definitive replay as
+  conflict. A rejected candidate is not resent but does not block a different candidate.
+  While an unresolved or accepted effect exists, that exact scope waits but the rest of
+  the queue continues. A later trusted catalogue refresh clears all intents for a solved
+  challenge; reconcilable nonterminal states may clear after five unchanged minutes.
+  Candidate text is never stored. Capacity is 4,096 intents and fails closed rather than
+  evicting duplicate/effect evidence.
 
 The database defaults to `/work/runtime-state.sqlite3`, uses WAL plus full synchronous
 commits, short transactions and bounded lock waits. `checkpoint()` requests a passive

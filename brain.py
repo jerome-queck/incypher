@@ -581,13 +581,18 @@ class Brain:
             self._log("[step %d] submission budget exhausted" % step)
             return {"solved": False, "steps": step,
                     "error": "submission budget exhausted"}
-        if callable(self._reserve_submission) and not self._reserve_submission(flag):
-            return {
-                "solved": False,
-                "steps": step,
-                "verdict": {"status": "uncertain"},
-                "error": "submission unresolved: reconciliation required",
-            }
+        if callable(self._reserve_submission):
+            reservation = self._reserve_submission(flag)
+            if reservation == "rejected":
+                self._log("[step %d] candidate already rejected" % step)
+                return None
+            if reservation != "reserved":
+                return {
+                    "solved": False,
+                    "steps": step,
+                    "verdict": {"status": "uncertain"},
+                    "error": "submission unresolved: reconciliation required",
+                }
         if (
             callable(self._mark_submission_dispatch_possible)
             and not self._mark_submission_dispatch_possible(flag)

@@ -94,7 +94,7 @@ class SubmissionShell:
 
     def reserve_submission(self, candidate):
         self.reservations.append(candidate)
-        return self.admit
+        return "reserved" if self.admit else "blocked"
 
     def submission_reconciled(self):
         return self.reconciled
@@ -1069,10 +1069,28 @@ class BrainTests(unittest.TestCase):
                 return "unused"
 
             def reserve_submission(self, candidate):
-                return True
+                return "reserved"
 
         with self.assertRaisesRegex(ValueError, "supplied together"):
             brain.Brain(PartialShell(), Mock(), verbose=False)
+
+    def test_durable_rejected_candidate_is_not_dispatched(self):
+        class RejectedShell(SubmissionShell):
+            def reserve_submission(self, candidate):
+                self.reservations.append(candidate)
+                return "rejected"
+
+        candidate = "INCYPHER{durably-wrong}"
+        submit = Mock()
+        result = ScriptedBrain(
+            [{"content": candidate}],
+            run_bash=RejectedShell(),
+            submit_flag=submit,
+            verbose=False,
+        ).solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        submit.assert_not_called()
 
     def test_malformed_model_messages_return_failure_without_dispatch(self):
         for reply in ([], None, {"content": []}, {"tool_calls": {}},

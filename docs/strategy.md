@@ -86,7 +86,9 @@ initial or malformed reads fail closed. Submission intent is durably keyed to ex
 material/instance scope, then marked dispatch-possible immediately before callback dispatch.
 An uncertain callback defers only that scope until a trusted catalogue refresh
 shows it solved or, after five minutes, still unsolved; no uncertain candidate is blindly
-replayed. At the same cadence, a bounded three-second public
+replayed. Attributable accepted/rejected outcomes remain durable and idempotent across
+the outer outcome checkpoint; contradictory definitive replay becomes conflict. At the
+same cadence, a bounded three-second public
 read of the official score page extracts only its recent-event JSON and overlays exact-name
 solve counts as a weak queue hint. Missing, malformed, oversized or unavailable public data
 contributes no hint and never blocks the trusted catalogue. It does not contact challenge

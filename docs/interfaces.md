@@ -57,7 +57,8 @@ fingerprints and typed safe findings. Accepted model turns and new tool observat
 checkpoint scheduler progress before final/crash classification. Before callback dispatch,
 the active shell durably stores only a scope-keyed candidate identity, then commits a
 separate dispatch-possible marker. Uncertain effects block that exact material/instance
-scope until trusted catalogue reconciliation; other work continues.
+scope until trusted catalogue reconciliation; attributable terminal outcomes remain as
+idempotent tombstones through the outer checkpoint, and other work continues.
 
 ## Limits and change coordination
 

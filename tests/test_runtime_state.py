@@ -300,11 +300,15 @@ class RuntimeStateTests(unittest.TestCase):
         context = self.finding_context(self.static)
         candidate = "INCYPHER{SUBMISSION_SENTINEL}"
         self.store.rank_briefs([brief], now=10)
-        self.assertTrue(self.store.reserve_submission(context, candidate, now=10))
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
         self.assertTrue(
             self.store.mark_submission_dispatch_possible(context, candidate, now=11)
         )
-        self.assertFalse(self.store.reserve_submission(context, candidate, now=11))
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=11), "blocked"
+        )
         self.store.reconcile_submission(context, candidate, "uncertain", now=12)
 
         self.assertFalse(self.store.submission_reconciled(context))
@@ -319,22 +323,35 @@ class RuntimeStateTests(unittest.TestCase):
         )
         self.assertNotIn(b"SUBMISSION_SENTINEL", payload)
 
-    def test_definitive_submission_verdict_clears_intent_immediately(self):
+    def test_rejected_submission_tombstone_allows_a_different_candidate(self):
         brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
         context = self.finding_context(self.static)
         self.store.rank_briefs([brief], now=10)
-        self.assertTrue(self.store.reserve_submission(context, "INCYPHER{safe}", now=10))
+        self.assertEqual(
+            self.store.reserve_submission(context, "INCYPHER{safe}", now=10),
+            "reserved",
+        )
         self.assertTrue(self.store.mark_submission_dispatch_possible(
             context, "INCYPHER{safe}", now=10.5
         ))
         self.store.reconcile_submission(context, "INCYPHER{safe}", "incorrect", now=11)
         self.assertTrue(self.store.submission_reconciled(context))
+        self.assertEqual(
+            self.store.reserve_submission(context, "INCYPHER{safe}", now=12),
+            "rejected",
+        )
+        self.assertEqual(
+            self.store.reserve_submission(context, "INCYPHER{different}", now=12),
+            "reserved",
+        )
 
     def test_dispatch_marker_survives_restart_and_is_scope_exact(self):
         context = self.finding_context(self.static)
         other = self.finding_context(Scope(7, "material-new", ChallengeKind.STATIC))
         candidate = "INCYPHER{possible-effect}"
-        self.assertTrue(self.store.reserve_submission(context, candidate, now=10))
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
         self.assertTrue(
             self.store.mark_submission_dispatch_possible(context, candidate, now=11)
         )
@@ -342,7 +359,9 @@ class RuntimeStateTests(unittest.TestCase):
         restarted = RuntimeState(self.path)
         self.assertFalse(restarted.submission_reconciled(context))
         self.assertTrue(restarted.submission_reconciled(other))
-        self.assertTrue(restarted.reserve_submission(other, candidate, now=12))
+        self.assertEqual(
+            restarted.reserve_submission(other, candidate, now=12), "reserved"
+        )
 
     def test_dispatch_marker_commit_failure_preserves_safe_reservation(self):
         def fail(operation):
@@ -352,13 +371,41 @@ class RuntimeStateTests(unittest.TestCase):
         context = self.finding_context(self.static)
         candidate = "INCYPHER{marker-not-committed}"
         store = RuntimeState(self.path, before_commit=fail)
-        self.assertTrue(store.reserve_submission(context, candidate, now=10))
+        self.assertEqual(store.reserve_submission(context, candidate, now=10), "reserved")
         with self.assertRaisesRegex(RuntimeStateError, "was not committed"):
             store.mark_submission_dispatch_possible(context, candidate, now=11)
 
         restarted = RuntimeState(self.path)
         self.assertTrue(restarted.submission_reconciled(context))
-        self.assertTrue(restarted.reserve_submission(context, candidate, now=12))
+        self.assertEqual(
+            restarted.reserve_submission(context, candidate, now=12), "reserved"
+        )
+
+    def test_terminal_submission_replay_is_idempotent_and_conflict_is_durable(self):
+        context = self.finding_context(self.static)
+        candidate = "INCYPHER{accepted-before-checkpoint}"
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+        self.store.reconcile_submission(context, candidate, "correct", now=12)
+        self.store.reconcile_submission(context, candidate, "correct", now=13)
+        self.assertFalse(self.store.submission_reconciled(context))
+
+        self.store.reconcile_submission(context, candidate, "incorrect", now=14)
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": False}],
+            now=1000,
+        )
+        self.assertFalse(self.store.submission_reconciled(context))
+
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": True}],
+            now=1001,
+        )
+        self.assertTrue(self.store.submission_reconciled(context))
 
     def test_submission_reservation_commit_failure_fails_before_dispatch(self):
         def fail(operation):
