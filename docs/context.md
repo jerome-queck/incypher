@@ -18,7 +18,7 @@ were merged. No open PR contained the requested general practice-selection chang
 | --- | --- | --- |
 | `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; live persistent serial queue | One bounded solve slice per inherited pass, then local rerank/requeue; five-minute catalogue/public-crowd refresh; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
-| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, packaged 12-call/runtime-overridable `MAX_STEPS` slice cap, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
+| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, packaged 16-call/runtime-overridable `MAX_STEPS` slice cap, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
 | `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, Day-2 served-model discovery and durable conservative ledger; candidate requests high/medium reasoning only when discovered as supported and paces cumulative spend against a configurable window; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
@@ -39,9 +39,9 @@ PR4 adds strict typed safe findings and serial same-run revisits governed by
 [strategy.md](strategy.md). The release runtime passed fresh RSA/network/reversing at 3/3.
 The deployed runtime removes arbitrary cumulative slice/call abandonment, retains the
 per-slice inherited `MAX_STEPS` and dollar governor, and adds durable adaptive spend pacing.
-Newer local source adds bounded five-minute public crowd signals, fail-closed Day-2 model
-discovery, unresolved-dispatch shutdown and scoped submission reconciliation; it is checked
-locally but not pushed over the progressing live run.
+PR #18 merged bounded five-minute public crowd signals, fail-closed Day-2 model
+discovery, unresolved-dispatch shutdown and scoped submission reconciliation. The
+separate 16/20 packaged-slice candidate is under local verification.
 
 ## Evidence and release identity
 
@@ -50,7 +50,11 @@ locally but not pushed over the progressing live run.
   began scoring at 03:10 SGT and remains `running`. By 04:10 it earned eleven fresh
   arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
   persistent solving and queue rotation. The board now explicitly charges 100 points for
-  every re-upload after the first scored run begins, so the working run is not replaced.
+  every re-upload after the first scored run begins. At 04:15 the explicitly requested
+  replacement push #21 registered immediately; the registry confirms exact Day-1 digest
+  `sha256:c7c21321634911e86d20d4b8eb2d1c6d2a314d88d2ad30524e08c209425e76d4`.
+  At 04:25 the public row remained `running`, 11/15 and penalty 0. It does not expose
+  the active run's digest; pickup of #21 is not yet proven.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -63,7 +67,21 @@ locally but not pushed over the progressing live run.
   suite. Checked Day-1 fallback
   `sha256:c7c21321634911e86d20d4b8eb2d1c6d2a314d88d2ad30524e08c209425e76d4`
   is 284,044,138 bytes, passes checker 6/0/2, contains exactly the five expected private
-  model/budget names and no validation selector. Neither exact-head image has been pushed.
+  model/budget names and no validation selector. PR #18 merged as `eb8c6bd`; this Day-1
+  image was pushed as #21, while the clean Day-2 image remains local.
+
+- Local held-out B26 on that exact successor was 2/3: fresh RSA and network accepted,
+  reversing exhausted 10 calls/10 tools with no submission. B27 reproduced the
+  reversing miss at 10 calls; its private sanitized command sequence reached inverse
+  verification at the bound. B28 passed a fresh reversing case at 4/3 with a 16-call/
+  20-tool visible ceiling; the newly packaged 16/20 candidate
+  `sha256:5664fbe5cee84d2d0e2773478dfbbe27ccbd3113573d044a3026f5ff7a3cf629`
+  passed another fresh reversing case in 10/12, one correct/zero wrong, measured USD
+  0.00673036. These are synthetic local outcomes, not proof for the four live unsolved
+  challenges. The checked Day-1 variant is
+  `sha256:d7c560ff5bdbd40724f802e006d3d1835f5308c912a9fcb7e8b847009afd7f07`;
+  both are AMD64/checker 6/0/2 and not submitted. Next: review/merge the bounded
+  horizon change, inspect board pickup/penalty, then consider a readiness-gated release.
 
 - Public board reset at **22 Sep 02:00 SGT** from 7/15 to 0/15. Push #13 used a clean
   Day-2 image during Day 1 and finished 0/15. At 02:14:37 both corrective Day-1 pushes
