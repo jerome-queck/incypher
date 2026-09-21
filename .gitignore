@@ -1,6 +1,8 @@
 .DS_Store
 .env
 .env.*
+day1-llm.env
+.day1-llm.env
 *.key
 *.pem
 *.p12
@@ -14,3 +16,14 @@ codex-home/
 state/
 goal-objective.md
 competition-requirements.md
+__pycache__/
+*.pyc
+output/
+results.json
+work/
+.coverage
+.pytest_cache/
+htmlcov/
+*.log
+private/
+extracted/
