@@ -10,8 +10,10 @@ The active Brain retains the inherited compatible endpoint's core tool fields an
 legacy completion limit for opaque providers, but infers no reasoning or temperature.
 A provider known to
 support an OpenRouter-shaped `reasoning` field may receive `{"effort":"high"}`; a
-provider declaring `reasoning_effort` receives the scalar form. No model fallback or
-identity substitution occurs. The gateway performs one finite-timeout transport call
+provider declaring `reasoning_effort` receives the scalar form. No substitution occurs
+for an explicit runtime model. The Day-2 image-default discovery policy may resolve a
+different catalogue-advertised model before the first request; that resolved identity is
+then exact. The gateway performs one finite-timeout transport call
 and never automatically retries a paid request.
 
 The gateway enforces its own caller-return deadline with a daemon transport worker even
@@ -43,7 +45,7 @@ when measured. The durable ledger defaults to `/work/model-budget.sqlite3`, an U
 admission ceiling and USD 1 opaque-price reservations, leaving USD 15 of the competition
 allowance unadmitted for recovery/verification. The ceiling cannot exceed USD 85; opaque
 reservations must remain USD 0.05–5. Optional environment tuning is bounded;
-Day 2 still requires only the organiser's injected model triplet.
+Day 2 requires the organiser's injected endpoint/key plus the image model policy.
 
 The ledger also stores its first-start wall time. Arena mode compares durable measured,
 estimated and unresolved spend, plus the next conservative reservation, with a linear

@@ -15,6 +15,18 @@ if [ -r "$day1_llm_env_file" ] && \
 fi
 unset day1_llm_env_file
 
+# Day 2 injects only endpoint and key. Supply the image's model policy without
+# mixing it into any partial/explicit three-variable configuration.
+if [ -z "${LLM_MODEL+x}" ] && \
+   [ -n "${LLM_BASE_URL-}" ] && \
+   [ -n "${LLM_API_KEY-}" ] && \
+   [ -n "${ARENA_DEFAULT_LLM_MODEL-}" ]; then
+    LLM_MODEL=$ARENA_DEFAULT_LLM_MODEL
+    LLM_MODEL_AUTO_DISCOVER=1
+    export LLM_MODEL LLM_MODEL_AUTO_DISCOVER
+fi
+unset ARENA_DEFAULT_LLM_MODEL
+
 if [ -r /opt/agent/.validation-id ]; then
     exec python /opt/agent/validation_main.py
 fi

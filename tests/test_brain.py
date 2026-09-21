@@ -142,7 +142,7 @@ class BrainTests(unittest.TestCase):
             def __init__(self):
                 self.posts = []
 
-            def get(self, url, timeout, stream):
+            def get(self, url, timeout, stream, headers=None):
                 return Response({"data": [{
                     "id": "openai/test-model",
                     "canonical_slug": "openai/test-model-20260901",
@@ -226,6 +226,61 @@ class BrainTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", request)
         self.assertEqual(request["max_tokens"], 4096)
 
+    def test_image_default_discovers_served_tool_model_and_capabilities(self):
+        class Response:
+            def __init__(self, payload):
+                self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.posts = []
+                self.gets = []
+
+            def get(self, url, timeout, stream, headers=None):
+                self.gets.append((url, dict(headers or {})))
+                return Response({"data": [
+                    {"id": "text-only", "supported_parameters": ["temperature"]},
+                    {"id": "served/tool-model", "supported_parameters": [
+                        "tools", "tool_choice", "reasoning_effort",
+                        "max_completion_tokens",
+                    ]},
+                ]})
+
+            def post(self, endpoint, headers, data, timeout, stream):
+                self.posts.append(json.loads(data))
+                return Response({
+                    "model": "served/tool-model",
+                    "choices": [{"message": {"role": "assistant", "content": "done"}}],
+                    "usage": {"cost": "0.01"},
+                })
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://organizer.example/v1",
+            "LLM_MODEL": "openai/gpt-5.6-luna",
+            "LLM_MODEL_AUTO_DISCOVER": "1",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = Session()
+            message = agent._chat([{"role": "user", "content": "test"}])
+
+        self.assertEqual(message["content"], "done")
+        self.assertEqual(agent.s.gets[0][0], "https://organizer.example/v1/models")
+        self.assertEqual(agent.s.gets[0][1]["Authorization"], "Bearer secret")
+        self.assertEqual(agent.s.posts[0]["model"], "served/tool-model")
+        self.assertEqual(agent.s.posts[0]["reasoning_effort"], "high")
+
     def test_observed_model_substitution_is_terminal_after_accounting(self):
         class Response:
             def __init__(self, payload):
@@ -242,7 +297,7 @@ class BrainTests(unittest.TestCase):
                 return None
 
         class Session:
-            def get(self, url, timeout, stream):
+            def get(self, url, timeout, stream, headers=None):
                 return Response({"data": []})
 
             def post(self, endpoint, headers, data, timeout, stream):

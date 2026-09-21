@@ -29,7 +29,12 @@ from agent_ext.model_gateway import (
     RequestOptions,
 )
 from agent_ext.playbooks import playbook_for
-from agent_ext.provider_discovery import DiscoveryCache, discover_provider, estimate_max_cost
+from agent_ext.provider_discovery import (
+    DiscoveryCache,
+    discover_provider,
+    discover_served_model,
+    estimate_max_cost,
+)
 from agent_ext.runtime_context import (
     Finding,
     FindingDisposition,
@@ -207,13 +212,21 @@ def _read_bounded_response(response, maximum_bytes: int, deadline: float) -> byt
             close()
 
 
-def _bounded_get(session, url: str, timeout_seconds: float, maximum_bytes: int) -> bytes:
+def _bounded_get(
+    session,
+    url: str,
+    timeout_seconds: float,
+    maximum_bytes: int,
+    headers: dict[str, str] | None = None,
+) -> bytes:
     outcome = queue.Queue(maxsize=1)
 
     def fetch() -> None:
         try:
             deadline = time.monotonic() + timeout_seconds
-            response = session.get(url, timeout=timeout_seconds, stream=True)
+            response = session.get(
+                url, timeout=timeout_seconds, stream=True, headers=dict(headers or {})
+            )
             body = _read_bounded_response(response, maximum_bytes, deadline)
         except Exception:
             outcome.put((False, None))
@@ -361,6 +374,7 @@ class Brain:
         self.model_calls = 0
         self._standalone_attempt = uuid.uuid4().hex
         self._gateway = None
+        self._identity = None
         self._ledger = None
         self._opaque_reserve = None
         self._discovery = None
@@ -420,7 +434,7 @@ class Brain:
 
     def _chat(self, messages):
         config = LLMConfig.from_environment(os.environ)
-        identity = ProviderIdentity(config.chat_url, config.api_key, config.model)
+        configured_identity = ProviderIdentity(config.chat_url, config.api_key, config.model)
 
         trusted = current_attempt()
         timeout = float(os.environ.get("MODEL_TIMEOUT_SECONDS", "120"))
@@ -434,10 +448,26 @@ class Brain:
         snapshot = ledger.snapshot()
 
         def fetch_json(url, timeout_seconds, maximum_bytes):
-            return _bounded_get(self.s, url, timeout_seconds, maximum_bytes)
+            return _bounded_get(
+                self.s,
+                url,
+                timeout_seconds,
+                maximum_bytes,
+                {"Authorization": f"Bearer {config.api_key}"},
+            )
 
-        if self._discovery is None:
-            self._discovery = discover_provider(identity, fetch_json, _DISCOVERY_CACHE)
+        if self._identity is None:
+            if os.environ.get("LLM_MODEL_AUTO_DISCOVER") == "1":
+                self._identity, self._discovery = discover_served_model(
+                    configured_identity, fetch_json
+                )
+            else:
+                self._identity = configured_identity
+                self._discovery = discover_provider(
+                    configured_identity, fetch_json, _DISCOVERY_CACHE
+                )
+        identity = self._identity
+        assert self._discovery is not None
         supported = set(self._discovery.capabilities.optional_parameters)
         # Tool calling is part of the inherited compatible endpoint contract and
         # was already required by the baseline Brain. Opaque providers get only
@@ -504,7 +534,7 @@ class Brain:
         ledger.settle(call_id, response.usage)
         observed = response.observed_model
         if observed is not None and not _observed_identity_matches(
-            config.model, observed, self._discovery
+            identity.model, observed, self._discovery
         ):
             raise GatewayError("provider returned an unexpected model identity")
         return dict(response.message)

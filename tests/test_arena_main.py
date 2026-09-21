@@ -434,7 +434,7 @@ class ArenaSelectionTests(unittest.TestCase):
                     }}], "usage": {"cost": "0.0001"}},
                 ])
 
-            def get(self, url, timeout, stream):
+            def get(self, url, timeout, stream, headers=None):
                 return Response({"data": [{
                     "id": "openai/integration-model",
                     "canonical_slug": "openai/integration-model",

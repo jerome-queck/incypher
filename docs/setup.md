@@ -30,7 +30,8 @@ passes only allowlisted runtime names, including the budget controls above. A bu
 ledger stores its initial dollar ceiling and rejects later reuse with a different ceiling;
 use a fresh work directory for a newly budgeted run. The solver does not query provider
 balance automatically. Local `practice` forces fixed-high reasoning while retaining the
-configured `LLM_MODEL`. `build --phase day2` passes no model secret.
+configured `LLM_MODEL`. `build --phase day2` passes no model secret; its image default is
+used only when the organiser supplies endpoint/key without a model.
 Day-1 builds may include the bounded model-budget policy values above alongside the model
 triplet; platform credentials are never copied.
 This repo does not discover or
@@ -136,7 +137,10 @@ Complete before the user-confirmed 22 Sep 10:00 SGT start:
    `build --phase day2`; no `INCLUDE_DAY1_LLM` or `VALIDATION_CHALLENGE_ID`.
 3. Run `check` on that exact image. This imports every packaged module and executes
    the bundled checker without a token. Confirm runtime `LLM_*` precedence and no
-   Day-1 secret/validation file. A structural pass does not validate the Day-2 model.
+   Day-1 secret/validation file. When only endpoint/key are present, the entrypoint marks
+   the image default for one bounded authenticated `/models` lookup: exact default wins,
+   otherwise the first advertised tool-capable model. Unavailable discovery retains the
+   image default. A structural pass does not validate the Day-2 endpoint or model.
 4. Complete one authorized practice model/tool/submission test when credentials are
    available. Record source SHA, image/base digests, checks and sanitized result.
    Distinguish local and arena-origin evidence.
