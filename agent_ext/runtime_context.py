@@ -14,6 +14,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .playbooks import normalize_category
+
 
 _CURRENT: ContextVar["AttemptContext | None"] = ContextVar("attempt_context", default=None)
 _MAX_FILES = 128
@@ -65,9 +67,10 @@ class AttemptContext:
         return f"{self.attempt_id}:model:{sequence}"
 
     def public_prompt(self) -> str:
+        category = normalize_category(self.category)
         return (
-            f"Trusted scope: challenge {self.challenge_id}; category {self.category}; "
-            f"points {self.points}; type {self.challenge_type}. "
+            f"Trusted scope: challenge {self.challenge_id}; category {category}; "
+            f"points {self.points}. "
             "Only supplied files and the inherited live-instance connection are authorized."
         )
 
@@ -132,18 +135,24 @@ def trusted_attempt(challenge: Mapping) -> Iterator[AttemptContext]:
         _CURRENT.reset(token)
 
 
-def _hash_file(path: Path) -> tuple[str, int, bool]:
+def _hash_file(path: Path) -> tuple[str, int]:
+    size = path.stat().st_size
+    if size > _MAX_HASH_BYTES:
+        raise ValueError("trusted material file exceeds hash limit")
     digest = hashlib.sha256()
     consumed = 0
     with path.open("rb") as stream:
-        while consumed < _MAX_HASH_BYTES:
-            chunk = stream.read(min(65536, _MAX_HASH_BYTES - consumed))
+        while True:
+            chunk = stream.read(65536)
             if not chunk:
                 break
             digest.update(chunk)
             consumed += len(chunk)
-        truncated = bool(stream.read(1))
-    return digest.hexdigest(), consumed, truncated
+            if consumed > _MAX_HASH_BYTES:
+                raise ValueError("trusted material file exceeds hash limit")
+    if consumed != size:
+        raise OSError("trusted material changed while hashing")
+    return digest.hexdigest(), consumed
 
 
 def bind_prepared_material(
@@ -167,11 +176,11 @@ def bind_prepared_material(
             records.append((os.path.basename(filename), "unavailable"))
             continue
         try:
-            digest, size, truncated = _hash_file(candidate)
+            digest, size = _hash_file(candidate)
         except OSError:
             records.append((candidate.name, "unavailable"))
         else:
-            records.append((candidate.name, digest, size, truncated))
+            records.append((candidate.name, digest, size))
     material = _digest(
         json.dumps(
             {"prior": current.material_ref, "files": records},

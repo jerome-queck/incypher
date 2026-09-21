@@ -64,6 +64,9 @@ raw provider exception text leaking into results. The optional bridge retains it
   exercised discovery, two model turns, one tool result, preserved provider reasoning
   metadata, one exact in-process submission and settled USD 0.0002678 with no unresolved
   reservation. This is local synthetic evidence, not practice or arena acceptance.
+  Frozen review of head `02976ca` requested bounded HTTP streaming, prompt-safe trusted
+  enums, fixed budget-policy bounds, catalogue-authorized canonical identity, full-or-reject
+  file hashing and integrated lifecycle/fault coverage; the review-fix head is pending.
 - Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
   Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
   macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,

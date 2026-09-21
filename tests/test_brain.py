@@ -3,10 +3,15 @@ import io
 import json
 import os
 import tempfile
+import threading
+import time
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import brain
+import agent_ext.runtime_context as runtime_context
+from agent_ext.provider_discovery import DiscoveryResult
 from agent_ext.runtime_context import trusted_attempt
 
 
@@ -48,24 +53,32 @@ class BrainTests(unittest.TestCase):
         class Response:
             def __init__(self, payload):
                 self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
 
             def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
                 return None
 
         class Session:
             def __init__(self):
                 self.posts = []
 
-            def get(self, url, timeout):
+            def get(self, url, timeout, stream):
                 return Response({"data": [{
                     "id": "openai/test-model",
+                    "canonical_slug": "openai/test-model-20260901",
                     "supported_parameters": [
                         "reasoning", "tools", "tool_choice", "max_completion_tokens",
                     ],
                     "pricing": {"prompt": "0.000001", "completion": "0.000002"},
                 }]})
 
-            def post(self, endpoint, headers, data, timeout):
+            def post(self, endpoint, headers, data, timeout, stream):
                 self.posts.append((endpoint, headers, json.loads(data), timeout))
                 return Response({
                     "model": "openai/test-model",
@@ -100,15 +113,22 @@ class BrainTests(unittest.TestCase):
         class Response:
             def __init__(self, payload):
                 self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
 
             def raise_for_status(self):
                 return None
 
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
+                return None
+
         class Session:
-            def get(self, url, timeout):
+            def get(self, url, timeout, stream):
                 return Response({"data": []})
 
-            def post(self, endpoint, headers, data, timeout):
+            def post(self, endpoint, headers, data, timeout, stream):
                 return Response({
                     "model": "other/model",
                     "choices": [{"message": {"role": "assistant", "content": "wrong"}}],
@@ -126,6 +146,64 @@ class BrainTests(unittest.TestCase):
             with self.assertRaisesRegex(Exception, "unexpected model identity"):
                 agent._chat([{"role": "user", "content": "test"}])
             self.assertEqual(agent._ledger.snapshot().measured_cost, brain.Decimal("0.02"))
+
+    def test_only_catalogue_canonical_model_is_accepted_as_observed_identity(self):
+        discovery = DiscoveryResult(
+            brain.ProviderCapabilities(), None, "openrouter_catalogue",
+            "openrouter_catalogue", "openai/model-20260901",
+        )
+        self.assertTrue(brain._observed_identity_matches(
+            "openai/model", "openai/model-20260901", discovery
+        ))
+        self.assertFalse(brain._observed_identity_matches(
+            "openai/model", "openai/model-20260902", discovery
+        ))
+        opaque = DiscoveryResult(
+            brain.ProviderCapabilities(), None, "opaque", "unknown", None
+        )
+        self.assertFalse(brain._observed_identity_matches(
+            "openai/model", "openai/model-20260901", opaque
+        ))
+
+    def test_budget_policy_rejects_ceiling_and_tiny_opaque_reserve(self):
+        with patch.dict(os.environ, {"MODEL_BUDGET_USD": "85.01"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "outside"):
+                brain._budget_policy()
+        with patch.dict(os.environ, {"MODEL_CALL_RESERVE_USD": "0.0001"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "outside"):
+                brain._budget_policy()
+
+    def test_stream_reader_rejects_declared_incremental_and_slow_oversize(self):
+        class Response:
+            def __init__(self, chunks, declared=None):
+                self.chunks = chunks
+                self.headers = {} if declared is None else {"Content-Length": declared}
+                self.closed = False
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield from self.chunks
+
+            def close(self):
+                self.closed = True
+
+        declared = Response([], "5")
+        with self.assertRaisesRegex(ValueError, "size limit"):
+            brain._read_bounded_response(declared, 4, brain.time.monotonic() + 1)
+        self.assertTrue(declared.closed)
+
+        incremental = Response([b"abc", b"de"])
+        with self.assertRaisesRegex(ValueError, "size limit"):
+            brain._read_bounded_response(incremental, 4, brain.time.monotonic() + 1)
+        self.assertTrue(incremental.closed)
+
+        slow = Response([b"a"])
+        with patch("brain.time.monotonic", return_value=10):
+            with self.assertRaisesRegex(TimeoutError, "deadline"):
+                brain._read_bounded_response(slow, 4, 9)
+        self.assertTrue(slow.closed)
 
     def test_full_lifecycle_runs_command_then_submits(self):
         candidate = "INCYPHER" + "{synthetic-lifecycle}"
@@ -282,6 +360,58 @@ class BrainTests(unittest.TestCase):
         self.assertFalse(result["solved"])
         self.assertEqual(result["steps"], 1)
         self.assertIn("TimeoutError", result["error"])
+
+    def test_expired_attempt_stops_before_provider_dispatch(self):
+        challenge = {
+            "id": 1, "name": "small", "category": "crypto", "type": "static",
+            "points": 100, "files": [],
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://opaque.invalid/v1",
+            "LLM_MODEL": "required/model",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+        }, clear=True), trusted_attempt(challenge):
+            current = runtime_context.current_attempt(required=True)
+            token = runtime_context._CURRENT.set(
+                replace(current, deadline_monotonic=time.monotonic() - 1)
+            )
+            try:
+                agent = brain.Brain(Mock(), Mock(), verbose=False)
+                agent.s.post = Mock(side_effect=AssertionError("must not dispatch"))
+                result = agent.solve("synthetic")
+            finally:
+                runtime_context._CURRENT.reset(token)
+        self.assertFalse(result["solved"])
+        self.assertIn("GatewayError", result["error"])
+        agent.s.post.assert_not_called()
+        self.assertIsNone(agent._ledger)
+
+    def test_timeout_after_dispatch_retains_durable_reservation(self):
+        released = threading.Event()
+
+        class Session:
+            def post(self, endpoint, headers, data, timeout, stream):
+                released.wait(0.2)
+                raise TimeoutError("synthetic provider stall")
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://opaque.invalid/v1",
+            "LLM_MODEL": "required/model",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            "MODEL_BUDGET_USD": "1",
+            "MODEL_TIMEOUT_SECONDS": "0.02",
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = Session()
+            result = agent.solve("synthetic")
+            snapshot = agent._ledger.snapshot()
+            released.set()
+
+        self.assertFalse(result["solved"])
+        self.assertIn("GatewayTimeout", result["error"])
+        self.assertEqual(snapshot.unresolved_cost, brain.Decimal("1"))
 
     def test_partial_model_configuration_fails_before_network_or_submission(self):
         submitted = []

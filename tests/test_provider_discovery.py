@@ -21,6 +21,7 @@ def fixture(model="openai/test-model", parameters=None, pricing=None):
     return {
         "data": [{
             "id": model,
+            "canonical_slug": model + "-20260901",
             "supported_parameters": parameters
             if parameters is not None
             else [
@@ -61,6 +62,7 @@ class ProviderDiscoveryTests(unittest.TestCase):
         self.assertEqual(result.pricing.completion_per_token, Decimal("0.000003"))
         self.assertEqual(result.source, "openrouter_catalogue")
         self.assertEqual(result.provenance, "openrouter_catalogue")
+        self.assertEqual(result.canonical_model, "openai/test-model-20260901")
         self.assertEqual(calls[0][0], "https://openrouter.ai/api/v1/models")
         self.assertLessEqual(calls[0][1], 5)
         self.assertLessEqual(calls[0][2], 2 * 1024 * 1024)
@@ -103,6 +105,12 @@ class ProviderDiscoveryTests(unittest.TestCase):
         result = discover_provider(identity(), lambda *_: document)
         self.assertEqual(result.capabilities.optional_parameters, frozenset())
         self.assertIsNotNone(result.pricing)
+
+    def test_malformed_canonical_model_is_not_trusted(self):
+        document = fixture()
+        document["data"][0]["canonical_slug"] = ["openai/test-model"]
+        result = discover_provider(identity(), lambda *_: document)
+        self.assertIsNone(result.canonical_model)
 
     def test_malformed_pricing_does_not_invent_cost(self):
         malformed = (

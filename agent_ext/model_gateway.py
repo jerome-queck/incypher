@@ -1,8 +1,8 @@
 """Provider-neutral chat request normalization and durable cost admission.
 
-This module is deliberately not wired to :mod:`brain`.  Callers supply trusted,
-injected provider identity and an explicit capability declaration.  The gateway
-performs one transport attempt; retry policy belongs to a later integration seam.
+Brain wires this module to the trusted, injected provider identity and explicit
+capability discovery. The gateway performs one transport attempt; retry policy belongs
+to a later coordinator seam.
 """
 
 from __future__ import annotations

@@ -51,8 +51,8 @@ _PLAYBOOKS = {
 }
 
 
-def playbook_for(category: str) -> str:
-    """Return one bounded playbook for an exact trusted category label."""
+def normalize_category(category: str) -> str:
+    """Map one organiser category label to a fixed, prompt-safe key."""
     if not isinstance(category, str) or len(category) > 64:
         normalized = "unknown"
     else:
@@ -61,4 +61,10 @@ def playbook_for(category: str) -> str:
             normalized = normalized[len("(practice)") :].lstrip()
     if normalized not in _PLAYBOOKS:
         normalized = "unknown"
+    return normalized
+
+
+def playbook_for(category: str) -> str:
+    """Return one bounded playbook for an exact trusted category label."""
+    normalized = normalize_category(category)
     return _PREFIX + _PLAYBOOKS[normalized]

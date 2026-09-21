@@ -12,6 +12,8 @@ injected bounded fetcher once with the public models URL, a five-second timeout 
 explicit supported optional parameters into `ProviderCapabilities` and parses bounded
 catalogue prompt/completion/request prices. Catalogue pricing provenance is explicit;
 it is not a provider charge or event budget meter.
+The exact entry's bounded `canonical_slug` is retained as the only alternate observed
+identity accepted for that configured model; opaque providers require exact identity.
 
 `estimate_max_cost` prices supplied prompt and completion token upper bounds at the
 uncached catalogue rates plus fixed request cost. It returns unknown when pricing or

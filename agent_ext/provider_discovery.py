@@ -67,9 +67,10 @@ class DiscoveryResult:
     pricing: ModelPricing | None
     source: str
     provenance: str
+    canonical_model: str | None = None
 
 
-_OPAQUE = DiscoveryResult(ProviderCapabilities(), None, "opaque", "unknown")
+_OPAQUE = DiscoveryResult(ProviderCapabilities(), None, "opaque", "unknown", None)
 
 
 class DiscoveryCache:
@@ -153,7 +154,7 @@ def _decimal(value: Any) -> Decimal | None:
 
 def _unknown_openrouter() -> DiscoveryResult:
     return DiscoveryResult(
-        ProviderCapabilities(), None, "openrouter_catalogue", "unknown"
+        ProviderCapabilities(), None, "openrouter_catalogue", "unknown", None
     )
 
 
@@ -241,11 +242,15 @@ def discover_provider(
             if malformed or exact is None:
                 result = _unknown_openrouter()
             else:
+                canonical = exact.get("canonical_slug")
+                if not isinstance(canonical, str) or not canonical or len(canonical) > _MAX_TEXT:
+                    canonical = None
                 result = DiscoveryResult(
                     _parse_capabilities(exact),
                     _parse_pricing(exact),
                     "openrouter_catalogue",
                     "openrouter_catalogue",
+                    canonical,
                 )
     if cache is not None and result.provenance != "unknown":
         cache.put(identity.model, result)

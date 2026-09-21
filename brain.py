@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
+import threading
 import time
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import requests
 
@@ -62,6 +64,10 @@ state the missing fact and spend the next call on a different bounded experiment
 
 _MAX_CONTEXT_BYTES = 48 * 1024
 _MAX_REASONING_DETAILS_BYTES = 16 * 1024
+_MAX_PROVIDER_RESPONSE_BYTES = 8 * 1024 * 1024
+_MODEL_BUDGET_MAX_USD = Decimal("85")
+_OPAQUE_RESERVE_MIN_USD = Decimal("0.05")
+_OPAQUE_RESERVE_MAX_USD = Decimal("5")
 _DISCOVERY_CACHE = DiscoveryCache()
 
 
@@ -86,6 +92,96 @@ def _bounded_messages(messages):
 
 def _redact(text: str) -> str:
     return FLAG_RE.sub("[flag redacted]", text)
+
+
+def _read_bounded_response(response, maximum_bytes: int, deadline: float) -> bytes:
+    try:
+        response.raise_for_status()
+        headers = getattr(response, "headers", {})
+        declared = headers.get("Content-Length") if hasattr(headers, "get") else None
+        if declared is not None:
+            try:
+                declared_size = int(declared)
+            except (TypeError, ValueError):
+                raise ValueError("invalid provider content length") from None
+            if declared_size < 0 or declared_size > maximum_bytes:
+                raise ValueError("provider response exceeded size limit")
+        chunks = []
+        consumed = 0
+        iterator = getattr(response, "iter_content", None)
+        if not callable(iterator):
+            raise ValueError("provider response is not streamable")
+        for chunk in iterator(chunk_size=65536):
+            if time.monotonic() > deadline:
+                raise TimeoutError("provider response deadline exceeded")
+            if not isinstance(chunk, bytes):
+                raise ValueError("provider response chunk is invalid")
+            consumed += len(chunk)
+            if consumed > maximum_bytes:
+                raise ValueError("provider response exceeded size limit")
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+
+
+def _bounded_get(session, url: str, timeout_seconds: float, maximum_bytes: int) -> bytes:
+    outcome = queue.Queue(maxsize=1)
+
+    def fetch() -> None:
+        try:
+            deadline = time.monotonic() + timeout_seconds
+            response = session.get(url, timeout=timeout_seconds, stream=True)
+            body = _read_bounded_response(response, maximum_bytes, deadline)
+        except Exception:
+            outcome.put((False, None))
+        else:
+            outcome.put((True, body))
+
+    worker = threading.Thread(target=fetch, name="provider-catalogue", daemon=True)
+    worker.start()
+    try:
+        succeeded, body = outcome.get(timeout=timeout_seconds)
+    except queue.Empty:
+        raise TimeoutError("provider catalogue deadline exceeded") from None
+    if not succeeded or not isinstance(body, bytes):
+        raise ValueError("provider catalogue request failed")
+    return body
+
+
+def _bounded_env_decimal(name: str, default: str, minimum: Decimal, maximum: Decimal) -> Decimal:
+    raw = os.environ.get(name, default)
+    if not isinstance(raw, str) or len(raw) > 64:
+        raise ValueError(f"{name} must be a bounded decimal")
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"{name} must be a bounded decimal") from None
+    if not value.is_finite() or value < minimum or value > maximum:
+        raise ValueError(f"{name} is outside the allowed range")
+    return value
+
+
+def _budget_policy() -> tuple[Decimal, Decimal]:
+    return (
+        _bounded_env_decimal("MODEL_BUDGET_USD", "85", Decimal("0.05"), _MODEL_BUDGET_MAX_USD),
+        _bounded_env_decimal(
+            "MODEL_CALL_RESERVE_USD", "1", _OPAQUE_RESERVE_MIN_USD,
+            _OPAQUE_RESERVE_MAX_USD,
+        ),
+    )
+
+
+def _observed_identity_matches(configured: str, observed: str, discovery) -> bool:
+    if observed == configured:
+        return True
+    return (
+        discovery.provenance == "openrouter_catalogue"
+        and discovery.canonical_model is not None
+        and observed == discovery.canonical_model
+    )
 
 
 def _assistant_turn(message: dict, content: str, tool_calls: list) -> dict | None:
@@ -124,6 +220,7 @@ class Brain:
         self._standalone_attempt = uuid.uuid4().hex
         self._gateway = None
         self._ledger = None
+        self._opaque_reserve = None
         self._discovery = None
         self.s = requests.Session()
         self.s.headers.update({
@@ -141,12 +238,7 @@ class Brain:
         identity = ProviderIdentity(config.chat_url, config.api_key, config.model)
 
         def fetch_json(url, timeout_seconds, maximum_bytes):
-            response = self.s.get(url, timeout=timeout_seconds)
-            response.raise_for_status()
-            content = response.content
-            if len(content) > maximum_bytes:
-                raise ValueError("provider catalogue exceeded size limit")
-            return content
+            return _bounded_get(self.s, url, timeout_seconds, maximum_bytes)
 
         if self._discovery is None:
             self._discovery = discover_provider(identity, fetch_json, _DISCOVERY_CACHE)
@@ -170,18 +262,22 @@ class Brain:
 
             def transport(endpoint, headers, body, timeout_seconds):
                 response = self.s.post(
-                    endpoint, headers=dict(headers), data=body, timeout=timeout_seconds
+                    endpoint, headers=dict(headers), data=body, timeout=timeout_seconds,
+                    stream=True,
                 )
-                response.raise_for_status()
-                return response.content
+                return _read_bounded_response(
+                    response, _MAX_PROVIDER_RESPONSE_BYTES,
+                    time.monotonic() + timeout_seconds,
+                )
 
             self._gateway = ModelGateway(transport, timeout_seconds=timeout)
         elif not self._gateway.dispatch_active:
             self._gateway.timeout_seconds = timeout
         if self._ledger is None:
+            budget_limit, self._opaque_reserve = _budget_policy()
             self._ledger = BudgetLedger(
                 os.environ.get("MODEL_BUDGET_PATH", "/work/model-budget.sqlite3"),
-                os.environ.get("MODEL_BUDGET_USD", "85"),
+                budget_limit,
             )
 
         self.model_calls += 1
@@ -198,7 +294,8 @@ class Brain:
         if estimated is not None:
             maximum = max(Decimal("0.05"), estimated * Decimal("1.5"))
         else:
-            maximum = Decimal(os.environ.get("MODEL_CALL_RESERVE_USD", "1"))
+            assert self._opaque_reserve is not None
+            maximum = self._opaque_reserve
         reservation = self._ledger.reserve(call_id, maximum)
         if not reservation.admitted:
             raise GatewayError("model budget exhausted")
@@ -213,9 +310,8 @@ class Brain:
         )
         self._ledger.settle(call_id, response.usage)
         observed = response.observed_model
-        if observed is not None and not (
-            observed == config.model
-            or re.fullmatch(re.escape(config.model) + r"-\d{8}", observed)
+        if observed is not None and not _observed_identity_matches(
+            config.model, observed, self._discovery
         ):
             raise GatewayError("provider returned an unexpected model identity")
         return dict(response.message)

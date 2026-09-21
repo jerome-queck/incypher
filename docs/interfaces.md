@@ -45,14 +45,17 @@ the harness runs. The optional `BrainAttempt` controller remains unconnected.
 Current Brain stops on unknown/malformed/rate-limit/error submission verdicts and avoids
 duplicate candidates within one solve. `correct` is acceptance; `already_solved` retains
 the harness's terminal success convention without proving this candidate was accepted.
-The normal loop has no durable reconciliation/restart ledger; optional helpers do.
+The normal loop has a durable model-cost reservation/settlement ledger, but no durable
+candidate reconciliation or restart-safe challenge progress; optional helpers cover
+parts of those separate concerns.
 
 ## Limits and change coordination
 
-Model calls have a 180-second HTTP timeout; inherited shell calls have a recorded
-120-second timeout. Brain step and submission limits are finite. They do not constitute
-a dollar budget or a hard overall attempt deadline. Optional guards are cooperative
-around synchronous calls, and cannot interrupt a call already in flight.
+Model calls default to 120 seconds and are also bounded by the trusted eight-minute
+attempt deadline; inherited shell calls retain their recorded 120-second timeout. Brain
+step, tool, submission and USD admission limits are finite. The gateway returns on its
+deadline and blocks overlapping dispatch while an unresolved transport worker remains;
+Python cannot forcibly cancel that worker. Shell callbacks remain synchronous.
 
 A malformed tool request is rejected before dispatch. The optional bridge can classify
 that rejection through `Brain._invalid_tool_arguments`; preserve that hook when changing
