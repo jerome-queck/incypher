@@ -47,19 +47,22 @@ locally but not pushed over the progressing live run.
 
 - Day-1 push #20, source `3a3452e`, remote digest
   `sha256:44065c5107ddcbc132932e32563b04c7d10bf60cb07116c2b4ec9e3b2fd0166e`,
-  began scoring at 03:10 SGT and remains `running`. By 03:39 it earned eleven fresh
+  began scoring at 03:10 SGT and remains `running`. By 04:10 it earned eleven fresh
   arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
   persistent solving and queue rotation. The board now explicitly charges 100 points for
   every re-upload after the first scored run begins, so the working run is not replaced.
-- Local successor runtime `223a937` passes 372 portable tests with 25 expected skips.
+- Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
+  both exact-head source/spec and standards reviews pass. It separately persists
+  account-terminal submission state and candidate verdicts across restarts and dynamic
+  replacement, retaining both until a trusted solved catalogue confirms reconciliation.
   Exact AMD64 Day-2 image
-  `sha256:45825c6fe08fb0bef8337845d2cd3d57281eb51d836c8ebf33627a7f8fd6920f`
-  is 284,043,611 bytes, passes checker 6/0/2, contains no Day-1 secret/selector, and
-  passes 366 non-entrypoint tests inside the read-only 2 CPU/2 GiB/256-PID sandbox as
-  non-root with ResourceWarnings fatal. The six entrypoint tests pass in the 372-test host
+  `sha256:cb09d7ddc72e02c06a1d2f8143d54acbd4192acba7109e1e65824b010f3e6833`
+  is 284,043,833 bytes, passes checker 6/0/2, contains no Day-1 secret/selector, and
+  passes 369 non-entrypoint tests inside the read-only 2 CPU/2 GiB/256-PID sandbox as
+  non-root with ResourceWarnings fatal. The six entrypoint tests pass in the 375-test host
   suite. Checked Day-1 fallback
-  `sha256:965fc76c5fb63ef5b2ef7bd70fdcd0b82dff29af2ee275d522d248d049e52ab4`
-  is 284,043,927 bytes, passes checker 6/0/2, contains exactly the five expected private
+  `sha256:c7c21321634911e86d20d4b8eb2d1c6d2a314d88d2ad30524e08c209425e76d4`
+  is 284,044,138 bytes, passes checker 6/0/2, contains exactly the five expected private
   model/budget names and no validation selector. Neither exact-head image has been pushed.
 
 - Public board reset at **22 Sep 02:00 SGT** from 7/15 to 0/15. Push #13 used a clean
