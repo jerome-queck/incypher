@@ -462,12 +462,44 @@ class RuntimeStateTests(unittest.TestCase):
         )
         self.store.reconcile_submission(context, candidate, "incorrect", now=12)
         self.store.reconcile_submission(context, candidate, "already_solved", now=13)
+        self.store.reconcile_submission(context, candidate, "correct", now=14)
+        with sqlite3.connect(self.path) as connection:
+            status, account_terminal = connection.execute(
+                """SELECT status, account_terminal FROM runtime_submission_intents
+                   WHERE challenge_id = 7"""
+            ).fetchone()
+        self.assertEqual((status, account_terminal), ("conflict", 1))
         self.assertFalse(self.store.submission_reconciled(replacement))
         self.store.reconcile_submission_catalogue(
             [{"id": 7, "points": 100, "type": "standard", "solved": False}],
             now=10_000,
         )
         self.assertFalse(self.store.submission_reconciled(replacement))
+
+    def test_existing_account_terminal_intent_is_migrated_without_reopening(self):
+        old_path = self.path.parent / "legacy.sqlite3"
+        replacement = self.finding_context(
+            Scope(7, "replacement-material", ChallengeKind.DYNAMIC, "new-instance")
+        )
+        with sqlite3.connect(old_path) as connection:
+            connection.execute(
+                """CREATE TABLE runtime_submission_intents (
+                   scope_key TEXT NOT NULL, challenge_id INTEGER NOT NULL,
+                   candidate_fp TEXT NOT NULL, status TEXT NOT NULL,
+                   updated_at REAL NOT NULL, PRIMARY KEY(scope_key, candidate_fp))"""
+            )
+            connection.execute(
+                """INSERT INTO runtime_submission_intents
+                   VALUES (?, 7, 'legacy-fingerprint', 'already_solved', 10)""",
+                (self.static.key,),
+            )
+        restarted = RuntimeState(old_path)
+        self.assertFalse(restarted.submission_reconciled(replacement))
+        with sqlite3.connect(old_path) as connection:
+            account_terminal = connection.execute(
+                "SELECT account_terminal FROM runtime_submission_intents"
+            ).fetchone()[0]
+        self.assertEqual(account_terminal, 1)
 
     def test_submission_reservation_commit_failure_fails_before_dispatch(self):
         def fail(operation):

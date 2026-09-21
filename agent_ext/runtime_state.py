@@ -325,6 +325,7 @@ class RuntimeState:
                         challenge_id INTEGER NOT NULL,
                         candidate_fp TEXT NOT NULL,
                         status TEXT NOT NULL,
+                        account_terminal INTEGER NOT NULL DEFAULT 0,
                         updated_at REAL NOT NULL,
                         PRIMARY KEY(scope_key, candidate_fp)
                     );
@@ -338,6 +339,20 @@ class RuntimeState:
                 if "finding_kind" not in columns:
                     connection.execute(
                         "ALTER TABLE observations ADD COLUMN finding_kind TEXT"
+                    )
+                submission_columns = {
+                    row["name"] for row in connection.execute(
+                        "PRAGMA table_info(runtime_submission_intents)"
+                    )
+                }
+                if "account_terminal" not in submission_columns:
+                    connection.execute(
+                        """ALTER TABLE runtime_submission_intents
+                           ADD COLUMN account_terminal INTEGER NOT NULL DEFAULT 0"""
+                    )
+                    connection.execute(
+                        """UPDATE runtime_submission_intents SET account_terminal = 1
+                           WHERE status = 'already_solved'"""
                     )
         except (OSError, sqlite3.Error) as exc:
             raise RuntimeStateError("runtime state is unavailable") from exc
@@ -588,8 +603,9 @@ class RuntimeState:
                     """SELECT 1 FROM runtime_submission_intents
                        WHERE (scope_key = ? AND status IN (
                            'dispatch_possible', 'uncertain', 'unavailable'
-                       )) OR (challenge_id = ? AND status IN (
-                           'accepted', 'already_solved', 'conflict'
+                       )) OR (challenge_id = ? AND (
+                           status IN ('accepted', 'already_solved', 'conflict')
+                           OR account_terminal = 1
                        )) LIMIT 1""",
                     (scope.key, scope.challenge_id),
                 ).fetchone()
@@ -619,8 +635,9 @@ class RuntimeState:
                     """SELECT 1 FROM runtime_submission_intents
                        WHERE (scope_key = ? AND status IN (
                            'dispatch_possible', 'uncertain', 'unavailable'
-                       )) OR (challenge_id = ? AND status IN (
-                           'accepted', 'already_solved', 'conflict'
+                       )) OR (challenge_id = ? AND (
+                           status IN ('accepted', 'already_solved', 'conflict')
+                           OR account_terminal = 1
                        )) LIMIT 1""",
                     (scope.key, scope.challenge_id),
                 ).fetchone()
@@ -723,7 +740,7 @@ class RuntimeState:
                 self._begin(connection)
                 fingerprint = self._submission_fingerprint(connection, scope, candidate)
                 row = connection.execute(
-                    """SELECT status FROM runtime_submission_intents
+                    """SELECT status, account_terminal FROM runtime_submission_intents
                        WHERE scope_key = ? AND candidate_fp = ?""",
                     (scope.key, fingerprint),
                 ).fetchone()
@@ -746,20 +763,21 @@ class RuntimeState:
                     resolved = current
                 elif {current, classified} == {"accepted", "rejected"}:
                     resolved = "conflict"
-                elif "accepted" in {current, classified}:
-                    resolved = "accepted"
-                elif "already_solved" in {current, classified}:
+                elif current in {"accepted", "rejected"}:
+                    resolved = current
+                elif classified in {"accepted", "rejected"}:
+                    resolved = classified
+                elif current == "already_solved" or classified == "already_solved":
                     resolved = "already_solved"
-                elif "rejected" in {current, classified}:
-                    resolved = "rejected"
                 else:
                     resolved = classified
-                if resolved != current:
+                account_terminal = row["account_terminal"] or classified == "already_solved"
+                if resolved != current or account_terminal != row["account_terminal"]:
                     connection.execute(
                         """UPDATE runtime_submission_intents
-                           SET status = ?, updated_at = ?
+                           SET status = ?, account_terminal = ?, updated_at = ?
                            WHERE scope_key = ? AND candidate_fp = ?""",
-                        (resolved, instant, scope.key, fingerprint),
+                        (resolved, int(account_terminal), instant, scope.key, fingerprint),
                     )
                 self._commit(connection, "reconcile_submission")
         except RuntimeStateError:
@@ -783,13 +801,14 @@ class RuntimeState:
             with closing(self._connect()) as connection:
                 self._begin(connection)
                 for row in connection.execute(
-                    """SELECT scope_key, challenge_id, candidate_fp, status, updated_at
+                    """SELECT scope_key, challenge_id, candidate_fp, status,
+                              account_terminal, updated_at
                        FROM runtime_submission_intents"""
                 ):
                     challenge_id = row["challenge_id"]
                     if challenge_id not in solved:
                         continue
-                    stale_reconcilable = row["status"] in {
+                    stale_reconcilable = not row["account_terminal"] and row["status"] in {
                         "dispatch_possible", "uncertain", "unavailable",
                     }
                     if solved[challenge_id] or (stale_reconcilable and (
