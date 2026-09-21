@@ -51,6 +51,9 @@ remains unconnected.
 Current Brain stops on unknown/malformed/rate-limit/error submission verdicts and avoids
 duplicate candidates within one solve. `correct` is acceptance; `already_solved` retains
 the harness's terminal success convention without proving this candidate was accepted.
+When a scoped finding callback exists and the slice has more than one model turn, its
+last turn offers only submission and typed checkpoint tools; an unadvertised shell
+call is rejected. A one-turn slice retains inspection so it cannot become inert.
 The normal loop has durable model-cost reservation/settlement and a separate bounded
 runtime-state database for challenge outcomes, finite ranking backoff, scoped command
 fingerprints and typed safe findings. Accepted model turns and new tool observations

@@ -577,6 +577,72 @@ class BrainTests(unittest.TestCase):
             [message.get("content") for message in agent.requests[1]],
         )
 
+    def test_final_turn_reserves_semantic_checkpoint_after_shell_evidence(self):
+        class BudgetAwareBrain(brain.Brain):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.offered = []
+
+            def _chat(self, messages):
+                offered = {tool["function"]["name"] for tool in self._tools}
+                self.offered.append(offered)
+                if len(self.offered) == 1:
+                    name, args = "run_bash", {"command": "inspect"}
+                elif "run_bash" in offered:
+                    name, args = "run_bash", {"command": "inspect more"}
+                else:
+                    name, args = "checkpoint_finding", {
+                        "kind": "next_step", "summary": "Test the block transform inverse.",
+                    }
+                return {"content": "", "tool_calls": [{"id": str(len(self.offered)),
+                    "function": {"name": name, "arguments": json.dumps(args)}}]}
+
+        shell = FindingShell()
+        with patch.dict(os.environ, {"MAX_TOOL_CALLS": "3"}):
+            agent = BudgetAwareBrain(
+                shell, Mock(), max_steps=2, verbose=False,
+            )
+            result = agent.solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        self.assertIn("run_bash", agent.offered[0])
+        self.assertNotIn("run_bash", agent.offered[1])
+        self.assertEqual(shell.findings, [Finding(
+            FindingKind.NEXT_STEP, "Test the block transform inverse.",
+        )])
+
+    def test_unoffered_final_shell_call_cannot_dispatch(self):
+        shell = Mock(return_value="new evidence")
+        shell.checkpoint_finding.return_value = FindingDisposition.SAVED
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": f"inspect-{index}"}),
+        }}]} for index in (1, 2)]
+        agent = ScriptedBrain(
+            replies, run_bash=shell, submit_flag=Mock(), max_steps=2, verbose=False,
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertEqual(result["final"], "step budget exhausted")
+        self.assertEqual(result["tool_calls"], 1)
+        self.assertEqual(shell.call_count, 1)
+        shell.checkpoint_finding.assert_not_called()
+        self.assertIn("run_bash", {tool["function"]["name"] for tool in agent._tools})
+
+    def test_single_turn_slice_keeps_inspection_available(self):
+        shell = FindingShell()
+        replies = [{"content": "", "tool_calls": [{"id": "inspect", "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": "inspect"}),
+        }}]}]
+        agent = ScriptedBrain(
+            replies, run_bash=shell, submit_flag=Mock(), max_steps=1, verbose=False,
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertEqual(result["tool_calls"], 1)
+        self.assertEqual(result["final"], "step budget exhausted")
+
     def test_rejected_or_duplicate_findings_are_quiet(self):
         for disposition, summary, expected_calls in (
             (FindingDisposition.REJECTED, "Recovered token synthetic-value", 0),

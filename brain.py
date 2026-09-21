@@ -675,13 +675,24 @@ class Brain:
             budget_notice += self._budget_notice()
             if steps == self.max_steps:
                 budget_notice += (
-                    " Final model turn: submit only a verified candidate; otherwise use any "
-                    "remaining call to checkpoint the best reusable finding or next step. "
-                    "Do not begin broad new analysis."
+                    " Final model turn: submit only a verified candidate; otherwise "
+                    "checkpoint the best reusable finding or next step if available. "
+                    "The unsolved queue will revisit this challenge. Do not begin broad "
+                    "new analysis."
                 )
             elif remaining_tools <= 2:
                 budget_notice += " Preserve one call for a checkpoint if the slice stays unsolved."
             messages.append({"role": "user", "content": budget_notice})
+            reserve_checkpoint = (
+                steps == self.max_steps
+                and steps > 1
+                and remaining_tools > 0
+                and callable(self._checkpoint_finding)
+            )
+            offered_tools = self._tools
+            if reserve_checkpoint:
+                self._tools = [tool for tool in offered_tools if tool["function"]["name"]
+                               in {"submit_flag", "checkpoint_finding"}]
             try:
                 message = self._chat(messages)
             except GatewayError as exc:
@@ -694,6 +705,8 @@ class Brain:
             except Exception as exc:  # noqa: BLE001 - raw provider/config details stay private
                 return {"solved": False, "steps": steps,
                         "error": f"{type(exc).__name__}: model request failed"}
+            finally:
+                self._tools = offered_tools
 
             if not isinstance(message, dict):
                 return {"solved": False, "steps": steps, "error": "malformed model message"}
@@ -749,6 +762,13 @@ class Brain:
                     "submit_flag": "flag",
                     "checkpoint_finding": "summary",
                 }.get(name)
+                if reserve_checkpoint and name not in {"submit_flag", "checkpoint_finding"}:
+                    messages.append({
+                        "role": "tool", "tool_call_id": tool_call.get("id"),
+                        "content": "Final turn reserves submission or a scoped finding.",
+                    })
+                    turn_quiet = True
+                    continue
                 if (not isinstance(arguments, dict)
                         or (argument_name is not None
                             and (not isinstance(arguments.get(argument_name), str)
