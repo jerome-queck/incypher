@@ -53,7 +53,13 @@ The ledger also stores its first-start wall time. Arena mode compares durable me
 estimated and unresolved spend, plus the next conservative reservation, with a linear
 budget target over `MODEL_BUDGET_WINDOW_SECONDS` (default 23,400 seconds). It requests
 high reasoning while starting, on pace or behind, and medium while materially ahead;
-completion capacity remains 4,096 tokens in every posture. The reasoning field is sent
+completion capacity stays 4,096 by default. Only an exact OpenRouter model whose
+catalogue advertises a valid >=8,192-token ceiling and known price may request
+8,192 when adaptive pacing remains behind target after pricing the expanded next
+call. Its full conservative reservation is taken before dispatch. Fixed-high
+local work, other postures and opaque/compatible Day-2 models remain at 4,096.
+This is a bounded opportunity for deeper work, not proof of better solves or
+an instruction to spend the remaining balance. The reasoning field is sent
 only when exact-model discovery advertises `reasoning` or `reasoning_effort`. Local
 practice, validation and direct Brain use default to fixed high; only the arena wrapper
 enables adaptive pacing when no explicit mode was supplied. Pacing changes request
