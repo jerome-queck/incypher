@@ -368,8 +368,6 @@ class _OuterCoordinator:
 
     def __init__(self):
         self.deadline = time.monotonic() + _MAX_RUN_SECONDS
-        self.total_slices = 0
-        self.model_calls = 0
         self.stop_reason: str | None = None
         self.begin_pass()
 
@@ -377,15 +375,12 @@ class _OuterCoordinator:
         self.pass_calls = 0
         self.pass_slices = 0
         self.pass_all_solved = True
-        self.pass_seen: set[int] = set()
 
-    def note_catalogue_solved(self, challenge_id: int) -> None:
+    def note_catalogue_solved(self) -> None:
         self.pass_calls += 1
-        self.pass_seen.add(challenge_id)
 
-    def admit(self, challenge_id: int, max_steps: int) -> tuple[int | None, str | None]:
+    def admit(self, max_steps: int) -> tuple[int | None, str | None]:
         self.pass_calls += 1
-        self.pass_seen.add(challenge_id)
         if self.stop_reason is not None:
             self.pass_all_solved = False
             return None, self.stop_reason
@@ -397,19 +392,15 @@ class _OuterCoordinator:
         if self.pass_slices:
             self.pass_all_solved = False
             return None, "queue reschedule"
-        self.total_slices += 1
         self.pass_slices += 1
         return max_steps, None
 
     def note_result(
         self,
-        challenge_id: int,
         *,
         solved: bool,
-        model_calls: int,
         outcome: AttemptOutcome,
     ) -> None:
-        self.model_calls += model_calls
         if time.monotonic() >= self.deadline:
             self.stop_reason = "run deadline"
         if outcome is AttemptOutcome.PROVIDER:
@@ -502,11 +493,11 @@ def main():
         ):
             raise RuntimeError("Official solve arguments changed; inspect base contract")
         if not validation_selector and isinstance(client, _RankedClient) and client.trusted_solved(cid):
-            coordinator.note_catalogue_solved(cid)
+            coordinator.note_catalogue_solved()
             result = _solved_result(ch)
             state.record_challenge_outcome(int(cid), True, 0, AttemptOutcome.UNSOLVED)
             return result
-        allocated_steps, deferred = coordinator.admit(cid, max_steps)
+        allocated_steps, deferred = coordinator.admit(max_steps)
         if deferred is not None:
             return _deferred_result(ch, deferred)
         assert allocated_steps is not None
@@ -526,9 +517,7 @@ def main():
                 )
                 state.checkpoint()
                 coordinator.note_result(
-                    cid,
                     solved=False,
-                    model_calls=observed_model_calls,
                     outcome=AttemptOutcome.CRASH,
                 )
                 return {
@@ -577,9 +566,7 @@ def main():
             client.mark_solved(int(cid))
         state.checkpoint()
         coordinator.note_result(
-            cid,
             solved=solved,
-            model_calls=observed_model_calls,
             outcome=outcome,
         )
         return result

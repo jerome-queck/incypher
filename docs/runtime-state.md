@@ -18,13 +18,9 @@ connections, credentials and candidate flags are not persisted.
   accepts only nonnegative exact-integer catalogue `solves` or `solve_count`; absent or
   malformed values contribute zero. Each solve adds 20 ranking points, capped after five
   solves (+100), so challenge points remain material while popular/easier work can move
-  ahead of a repeatedly wasted hard attempt. The production
-  wrapper refreshes that same trusted catalogue at most every five minutes and otherwise
-  reranks a defensive cached copy; it never scrapes a board or contacts challenge targets.
-  A temporary read/timeout after the first trusted snapshot retains that snapshot and
-  waits another full cadence; an initial outage or malformed structure still fails closed.
-  This mutable hint does not enter material or evidence scope hashes. Failed slices
-  receive finite 1s then 2s backoff.
+  ahead of a repeatedly wasted hard attempt. This mutable hint does not enter material or
+  evidence scope hashes. Failed slices receive finite 1s then 2s backoff. Production
+  refresh/cache policy is authoritative in [strategy.md](strategy.md).
 - Build `brief.scope` once a challenge is admitted. `checkpoint_outcome()` atomically
   records its bounded progress and classified `AttemptOutcome` after each final slice.
 - `record_challenge_progress()` durably advances a ranked challenge after each accepted

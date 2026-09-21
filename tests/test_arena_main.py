@@ -109,10 +109,10 @@ class ArenaSelectionTests(unittest.TestCase):
 
     def test_coordinator_runs_one_slice_before_safe_queue_reschedule(self):
         coordinator = arena_main._OuterCoordinator()
-        self.assertEqual(coordinator.admit(1, 4), (4, None))
-        self.assertEqual(coordinator.admit(2, 4), (None, "queue reschedule"))
+        self.assertEqual(coordinator.admit(4), (4, None))
+        self.assertEqual(coordinator.admit(4), (None, "queue reschedule"))
         coordinator.begin_pass()
-        self.assertEqual(coordinator.admit(2, 4), (4, None))
+        self.assertEqual(coordinator.admit(4), (4, None))
 
     def test_changed_official_hook_fails_before_harness_runs(self):
         official = SimpleNamespace(main=lambda: self.fail("changed harness must be inspected"))

@@ -769,13 +769,12 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         self.assertEqual(arena_main._MAX_RUN_SECONDS, 86_400)
         with patch("arena_main.time.monotonic", side_effect=[0.0, 86_400.0]):
             deadline = arena_main._OuterCoordinator()
-            self.assertEqual(deadline.admit(1, 4), (None, "run deadline"))
+            self.assertEqual(deadline.admit(4), (None, "run deadline"))
 
         slices = arena_main._OuterCoordinator()
         for _ in range(1_000):
             slices.begin_pass()
-            self.assertEqual(slices.admit(1, 1), (1, None))
-        self.assertEqual(slices.total_slices, 1_000)
+            self.assertEqual(slices.admit(1), (1, None))
 
     def test_attempt_deadline_is_capped_by_outer_run(self):
         challenge = {
