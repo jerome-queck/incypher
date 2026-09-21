@@ -37,7 +37,13 @@ restart; estimated cost may later be replaced by measured cost; repeated identic
 settlement is idempotent. A reservation can be released only through the explicit
 never-dispatched path. Records have a configured hard count limit and are retained for
 reconciliation, so capacity requires operator handling rather than unsafe pruning.
-The total limit is stored with the ledger and a restart using a different limit fails.
+The total limit is stored with the ledger. A restart may atomically lower it
+without discarding calls or resetting its pacing clock, including below current
+committed spend (which closes admission). Raising it fails. Existing instances
+also read the lower durable ceiling at admission and snapshot time, so a
+concurrent old instance cannot reopen budget capacity. This protects a
+reconfigured Day-1 image whether `/work` persists or starts fresh; a new
+ledger still needs a cap no greater than the provider balance actually left.
 
 Brain uses [provider discovery](provider-discovery.md) for the exact OpenRouter catalogue;
 opaque providers retain the compatible tool fields but receive no inferred reasoning or

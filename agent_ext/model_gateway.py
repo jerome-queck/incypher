@@ -457,27 +457,52 @@ class BudgetLedger:
                        value TEXT NOT NULL
                    )"""
             )
-            prior = connection.execute(
-                "SELECT value FROM model_budget_meta WHERE key = 'limit'"
-            ).fetchone()
-            if prior is None:
-                connection.execute(
-                    "INSERT INTO model_budget_meta(key, value) VALUES('limit', ?)",
-                    (str(self.limit),),
-                )
-            elif Decimal(prior["value"]) != self.limit:
-                raise ValueError("budget limit differs from the durable ledger")
-            started = connection.execute(
-                "SELECT value FROM model_budget_meta WHERE key = 'started_at'"
-            ).fetchone()
-            if started is None:
-                first_call = connection.execute(
-                    "SELECT MIN(created_at) AS value FROM model_budget_calls"
-                ).fetchone()["value"]
-                connection.execute(
-                    "INSERT INTO model_budget_meta(key, value) VALUES('started_at', ?)",
-                    (str(time.time() if first_call is None else first_call),),
-                )
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                prior = connection.execute(
+                    "SELECT value FROM model_budget_meta WHERE key = 'limit'"
+                ).fetchone()
+                if prior is None:
+                    connection.execute(
+                        "INSERT INTO model_budget_meta(key, value) VALUES('limit', ?)",
+                        (str(self.limit),),
+                    )
+                else:
+                    previous = Decimal(prior["value"])
+                    if self.limit > previous:
+                        raise ValueError("budget limit differs from the durable ledger")
+                    if self.limit < previous:
+                        connection.execute(
+                            "UPDATE model_budget_meta SET value = ? WHERE key = 'limit'",
+                            (str(self.limit),),
+                        )
+                started = connection.execute(
+                    "SELECT value FROM model_budget_meta WHERE key = 'started_at'"
+                ).fetchone()
+                if started is None:
+                    first_call = connection.execute(
+                        "SELECT MIN(created_at) AS value FROM model_budget_calls"
+                    ).fetchone()["value"]
+                    connection.execute(
+                        "INSERT INTO model_budget_meta(key, value) VALUES('started_at', ?)",
+                        (str(time.time() if first_call is None else first_call),),
+                    )
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+            connection.execute("COMMIT")
+
+    def _effective_limit(self, connection: sqlite3.Connection) -> Decimal:
+        row = connection.execute(
+            "SELECT value FROM model_budget_meta WHERE key = 'limit'"
+        ).fetchone()
+        try:
+            stored = Decimal(row["value"])
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            raise ValueError("budget ledger limit is invalid") from None
+        if not stored.is_finite() or stored <= 0:
+            raise ValueError("budget ledger limit is invalid")
+        return min(self.limit, stored)
 
     @staticmethod
     def _totals(connection: sqlite3.Connection) -> tuple[Decimal, Decimal, Decimal, int]:
@@ -518,7 +543,7 @@ class BudgetLedger:
             if count >= self.max_records:
                 connection.execute("ROLLBACK")
                 raise LedgerCapacityError("budget ledger capacity reached")
-            if measured + estimated + unresolved + maximum > self.limit:
+            if measured + estimated + unresolved + maximum > self._effective_limit(connection):
                 connection.execute("COMMIT")
                 return LedgerReservation(call_id, maximum, False, False, "budget_exhausted")
             now = time.time()
@@ -599,6 +624,7 @@ class BudgetLedger:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
             measured, estimated, unresolved, count = self._totals(connection)
+            limit = self._effective_limit(connection)
             started_row = connection.execute(
                 "SELECT value FROM model_budget_meta WHERE key = 'started_at'"
             ).fetchone()
@@ -610,9 +636,9 @@ class BudgetLedger:
         if not math.isfinite(started_at):
             raise ValueError("budget ledger start is invalid")
         committed = measured + estimated + unresolved
-        available = max(Decimal(0), self.limit - committed)
+        available = max(Decimal(0), limit - committed)
         return LedgerSnapshot(
-            self.limit,
+            limit,
             measured,
             estimated,
             unresolved,
