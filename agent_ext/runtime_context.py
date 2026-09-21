@@ -28,7 +28,9 @@ _RUNTIME_REDACTION_ENV = ("CTF_TOKEN", "CTF_SESSION", "LLM_API_KEY")
 
 _FINDING_DENIED_TERMS = re.compile(
     r"(?i)\b(?:flag|flags|secret|secrets|password|passwords|passwd|credential|"
-    r"credentials|candidate|candidates|token|tokens|bearer|authorization|cookie|cookies|api[-_ ]?key|"
+    r"credentials|candidate|candidates|token|tokens|bearer|authorization|"
+    r"auth|authenticate|authenticated|authentication|login|logon|account|"
+    r"username|user[-_ ]?id|passcode|cookie|cookies|api[-_ ]?key|"
     r"access[-_ ]?key|private[-_ ]?key|connection|connections|connect|connected|"
     r"connecting|endpoint|endpoints|host|hosts|hostname|hostnames|port|ports|"
     r"socket|sockets|listener|listeners|remote|ssh|tcp|udp|netcat)\b"

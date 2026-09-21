@@ -114,6 +114,21 @@ class ArenaSelectionTests(unittest.TestCase):
         coordinator.begin_pass()
         self.assertEqual(coordinator.admit(4), (4, None))
 
+    def test_per_slice_budget_exhaustion_is_requeueable_not_provider_uncertainty(self):
+        shell = SimpleNamespace(failure_outcome=None)
+        for error in ("tool call budget exhausted", "submission budget exhausted"):
+            with self.subTest(error=error):
+                self.assertIs(
+                    arena_main._failure_class({"error": error}, shell),
+                    arena_main.AttemptOutcome.UNSOLVED,
+                )
+        self.assertIs(
+            arena_main._failure_class(
+                {"error": "GatewayError: model budget exhausted"}, shell
+            ),
+            arena_main.AttemptOutcome.PROVIDER,
+        )
+
     def test_changed_official_hook_fails_before_harness_runs(self):
         official = SimpleNamespace(main=lambda: self.fail("changed harness must be inspected"))
         with patch.dict("sys.modules", {"main": official}):

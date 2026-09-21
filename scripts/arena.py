@@ -165,11 +165,13 @@ def main(argv=None):
         # Verify the selected execution mode before mutating the registry tag.
         if args.phase == "day1":
             preflight = (
-                "test -r /opt/agent/.day1-llm.env && "
-                "grep -q '^LLM_BASE_URL=' /opt/agent/.day1-llm.env && "
-                "grep -q '^LLM_MODEL=' /opt/agent/.day1-llm.env && "
-                "grep -q '^LLM_API_KEY=' /opt/agent/.day1-llm.env && "
-                "grep -q '^MODEL_BUDGET_USD=' /opt/agent/.day1-llm.env && "
+                "set -a && test -r /opt/agent/.day1-llm.env && "
+                ". /opt/agent/.day1-llm.env && set +a && "
+                "test -n \"$LLM_BASE_URL\" && test -n \"$LLM_MODEL\" && "
+                "test -n \"$LLM_API_KEY\" && "
+                "python -c 'import os; from decimal import Decimal; "
+                "value=Decimal(os.environ[\"MODEL_BUDGET_USD\"]); "
+                "assert value.is_finite() and Decimal(\"0.05\") <= value <= Decimal(\"85\")' && "
                 "test ! -e /opt/agent/.validation-id"
             )
         else:

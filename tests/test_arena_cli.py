@@ -97,6 +97,8 @@ class ArenaCommandTests(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
         command = run.call_args.args[0]
         self.assertIn("MODEL_BUDGET_USD", command[-1])
+        self.assertIn('test -n "$LLM_API_KEY"', command[-1])
+        self.assertIn('Decimal("0.05")', command[-1])
         self.assertNotIn('push', command)
 
     def test_registry_target_rejects_invalid_team(self):

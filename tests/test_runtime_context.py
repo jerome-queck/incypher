@@ -105,6 +105,8 @@ class RuntimeContextTests(unittest.TestCase):
             "Recovered ZQJTRPKMNVXHCBWLFDSAYUEG",
             "Recovered sk-abcdefghijklmnop",
             "key=synthetic-value",
+            "Authentication succeeded using admin:admin",
+            "Login accepted the value winter2026!",
             "Reuse the connection endpoint",
             " trailing whitespace ",
             "line one\nline two",

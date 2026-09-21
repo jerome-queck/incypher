@@ -314,6 +314,8 @@ class _StatefulShell:
 
 def _failure_class(result: Mapping, shell: _StatefulShell) -> AttemptOutcome:
     error = str(result.get("error", "")).lower()
+    if error in {"tool call budget exhausted", "submission budget exhausted"}:
+        return shell.failure_outcome or AttemptOutcome.UNSOLVED
     if "timeout" in error:
         return AttemptOutcome.TIMEOUT
     if any(word in error for word in ("resource", "capacity", "output_limit", "queue_")):
