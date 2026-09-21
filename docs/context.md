@@ -7,18 +7,19 @@ machine commands live in [setup.md](setup.md).
 ## Objective and current state
 
 Team **63 — procrastinators**. User-confirmed scored window: **22 Sep 2026,
-10:00–16:30 Asia/Singapore**. Optimize autonomous, valid points; equal points favor
-finish time. This docs/setup pass does not certify a competition-winning solver.
+10:00–16:30 Asia/Singapore**. Feature freeze is 06:30. Optimize autonomous, valid
+points; equal points favor finish time. The live-practice target remains 15/15; queueing,
+unit tests and synthetic solves are not scoring proof.
 
 Audited starting source: `6db8a39` on `main`. All five prior PRs (#1, #2, #3, #9, #12)
 were merged. No open PR contained the requested general practice-selection change.
 
 | Path | Actual status | Consequence |
 | --- | --- | --- |
-| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; PR4 multipass candidate under review | Serial inherited passes only; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
+| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; persistent serial queue candidate under review | One bounded solve slice per inherited pass, then local rerank/requeue; five-minute trusted catalogue refresh; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
 | `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, runtime `MAX_STEPS` slice cap, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
-| `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, high reasoning when supported and durable conservative ledger; opaque pricing remains unknown |
+| `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery and durable conservative ledger; candidate requests high/medium reasoning only when discovered as supported and paces cumulative spend against a configurable window; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
 | `agent_ext/runtime_state.py` | Active bounded SQLite seam; PR4 typed-findings candidate under review | Restart-safe backoff, scoped command/finding dedupe and <=16 record/8 KiB projection; raw commands, output, flags and credentials are not stored |
@@ -34,18 +35,27 @@ PR3 additionally bounds arbitrary shell capture, reaps descendants, prevents sam
 exact-command replay, stops three quiet turns after one replan, limits one candidate per
 evidence turn, classifies tool/crash outcomes durably and skips trusted solved briefs
 outside explicit validation images.
-PR4 candidate adds strict typed safe findings and bounded serial same-run revisits governed
-by [strategy.md](strategy.md). Its first held-out image passed RSA but exhausted
-the baked 6/10-turn limits on network/reversing without submissions. The repaired candidate
-uses inherited runtime `MAX_STEPS` directly, exposes dollar/tool controls to the
-local CLI, tells the model its remaining slice budget, and adds bounded generic aligned
-known-plaintext network guidance. Reset-set practice remains parked until final review/merge.
+PR4 adds strict typed safe findings and serial same-run revisits governed by
+[strategy.md](strategy.md). The release runtime passed fresh RSA/network/reversing at 3/3.
+The current candidate removes arbitrary cumulative slice/call abandonment, retains the
+per-slice inherited `MAX_STEPS` and dollar governor, polls trusted solve counts at five-minute
+cadence, and adds durable adaptive spend pacing. A Day-1 release is queued while this newer
+candidate continues through review/merge.
 
 ## Evidence and release identity
 
-- Public boards at **21 Sep 23:30 SGT**: rank 10, VALID 650, SCORE 650, five solves;
-  status 5/15, 12 pushes, last push 17:43:14, `done`, penalty 0. This is Day-1 evidence,
-  not final competition score. Read `/scores` and `/status` again for current values.
+- Public board reset at **22 Sep 02:00 SGT** from 7/15 to 0/15. Push #13 used a clean
+  Day-2 image during Day 1 and finished 0/15. At 02:14:37 both corrective Day-1 pushes
+  registered; push #15, last 02:10:01, reached `running` on both status and scores at
+  02:15:46, then changed to `collecting` by 02:18:20 with 0/15 and penalty 0. This is
+  a real early process exit; the queued runtime still contains the old no-progress stop
+  that the current candidate removes. Read `/scores` and `/status` again for collection.
+- Verified remote `latest` is the metadata-distinct Day-1 AMD64 digest
+  `sha256:a9ecc2d9192eab938c6c34d51107ecd3ef338e64f52a98a84eb484d165ce8725`.
+  It embeds only the model triplet plus a USD 19/fixed-high policy, has no CTF token or
+  validation selector, passes checker 6/0/2, and its exact in-image harness/practice
+  guards pass. The queued runtime source is `a43e59b`; newer local queue/pacing work is
+  not in that image.
 - Source docs previously called an older digest “current.” That is historical evidence
   only: public status does not identify the deployed digest or its source commit.
 - [Arena contract](arena-contract.md) records an earlier inspected base/harness.
@@ -69,6 +79,15 @@ known-plaintext network guidance. Reset-set practice remains parked until final 
   held-out cases pass RSA (4 calls/3 tools), network (5/4 under a 12/16 planning ceiling),
   and reversing (6/5), each with one correct/zero wrong submission and zero unresolved spend.
   This is local synthetic capability evidence, not practice or arena acceptance.
+- Hardened release runtime `a43e59b` retained 3/3 on fresh B19-B21: RSA 4/3,
+  network 7/7 under 12/16, reversing 9/8, one correct/zero wrong submission each and
+  zero unresolved spend. Total measured development spend through B21 is USD 0.06853611.
+- The uncommitted persistence/pacing candidate passes whitespace/compile checks and
+  347 portable tests with 25 expected platform skips. Clean AMD64 Day-2 image
+  `sha256:6e878ec8341b2898f5514365a7d7d86baedfd689e43eb8dda5e73871894cc927`
+  is 284,038,804 bytes and passes checker 6/0/2, all eight official guards, clean config,
+  imports and 145 focused non-root Linux tests with fatal ResourceWarnings. Independent
+  review remains before it may replace the queued release.
 - `.venv` is installed locally. The ignored mode-0600 `.env` is populated on this machine
   with Team 63 platform configuration and the Day-1 provider triplet migrated from the
   prior private files. `doctor` reports every required field set, registry login succeeds,
@@ -140,20 +159,14 @@ unchanged. A 21 Sep 23:30 SGT public-board refresh still showed 5/15, VALID/SCOR
 
 The ordered technical gates below are current after PR3 merge and PR4 implementation.
 
-1. **Review and merge PR4.** Freeze safe-findings/multipass source; require independent
-   Standards and Spec pass, exact AMD64 structural/Linux checks and merged-tree rebuild.
-2. **Prove solving.** Pass fresh RSA, framed-network and stripped-ELF held-out fixtures,
-   then use the CLI for the reset practice set only after the capability gate is green.
-   Start with one readiness-gated explicitly selected challenge via `scripts/arena.py`
-   or local Codex practice. Record accepted outcome, elapsed time and model/tool usage
-   privately; report sanitized counts. Local/manual solves do not prove arena VALID.
+1. **Freeze, review and merge the current candidate.** Require independent Standards and
+   Spec pass, exact AMD64 structural/Linux checks, PR/CI and merged-tree rebuild.
+2. **Monitor queued Day-1 push #15.** Record origin transitions and scores separately from
+   registry/queue evidence. Do not manually solve live tasks or request an organiser rerun.
 3. **Measure before optimizing.** Compare identical practice tasks and budgets for baseline
    versus a change. Prioritize valid points per cost/time, coverage and recovery. Static
    parallelism is permitted but unimplemented; dynamic capacity is globally one.
-4. **Readiness-gated Day-1 release and evidence collection.** Require fresh production-path
-   evidence for the remaining tasks, then publish the authorized private-key image early
-   enough to observe hands-off results and preserve rollback.
-5. **Prepare the clean Day-2 image.** Follow [release gates](setup.md#day-2-release).
+4. **Prepare the clean Day-2 image.** Follow [release gates](setup.md#day-2-release).
    Read runtime-injected model configuration; neither a Sol/Astra pin nor a local
    subscription is a substitute. Record the pushed digest and board outcome separately.
 

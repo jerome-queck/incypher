@@ -28,6 +28,29 @@ class ArenaCommandTests(unittest.TestCase):
         self.assertIn('INCLUDE_DAY1_LLM=1', args)
         self.assertIn('--no-cache', args)
 
+    def test_day1_environment_includes_budget_policy_but_not_platform_secret(self):
+        values = {
+            "LLM_BASE_URL": "https://model.test/v1",
+            "LLM_MODEL": "test/model",
+            "LLM_API_KEY": "synthetic-model-secret",
+            "MODEL_BUDGET_USD": "19",
+            "MODEL_SPEND_PACING": "fixed_high",
+            "CTF_TOKEN": "must-not-be-copied",
+        }
+        rendered = arena.day1_environment(values)
+        self.assertIn("MODEL_BUDGET_USD=19", rendered)
+        self.assertIn("MODEL_SPEND_PACING=fixed_high", rendered)
+        self.assertNotIn("CTF_TOKEN", rendered)
+        self.assertNotIn("must-not-be-copied", rendered)
+
+    def test_day1_environment_requires_explicit_budget(self):
+        with self.assertRaisesRegex(ValueError, "MODEL_BUDGET_USD"):
+            arena.day1_environment({
+                "LLM_BASE_URL": "https://model.test/v1",
+                "LLM_MODEL": "test/model",
+                "LLM_API_KEY": "synthetic-model-secret",
+            })
+
     def test_practice_limits_and_credentials_are_passed_by_name(self):
         values = {key: 'synthetic-secret' for key in arena.RUNTIME_KEYS}
         values['UNRELATED_SECRET'] = 'unrelated'
@@ -37,7 +60,8 @@ class ArenaCommandTests(unittest.TestCase):
         for expected in ('ONLY_IDS=94', '--read-only', '2g', '256', 'ALL',
                          'no-new-privileges', 'CTF_TOKEN', 'LLM_API_KEY',
                          'MAX_STEPS', 'MAX_TOOL_CALLS', 'MODEL_BUDGET_USD',
-                         'MODEL_CALL_RESERVE_USD'):
+                         'MODEL_CALL_RESERVE_USD', 'MODEL_BUDGET_WINDOW_SECONDS',
+                         'MODEL_SPEND_PACING=fixed_high'):
             self.assertIn(expected, args)
 
     def test_missing_model_key_fails_before_docker(self):
@@ -63,6 +87,17 @@ class ArenaCommandTests(unittest.TestCase):
                 arena.main(['push', '--phase', 'day2'])
         self.assertEqual(run.call_count, 1)
         self.assertNotIn('push', run.call_args.args[0])
+
+    def test_day1_push_stops_when_image_lacks_model_or_budget_file(self):
+        import subprocess
+        with patch.object(arena, 'read_environment', return_value={'TEAM_ID': '63'}), \
+             patch.object(arena, 'run', side_effect=subprocess.CalledProcessError(1, 'docker')) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                arena.main(['push', '--phase', 'day1'])
+        self.assertEqual(run.call_count, 1)
+        command = run.call_args.args[0]
+        self.assertIn("MODEL_BUDGET_USD", command[-1])
+        self.assertNotIn('push', command)
 
     def test_registry_target_rejects_invalid_team(self):
         with self.assertRaises(ValueError):

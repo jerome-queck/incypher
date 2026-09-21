@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import brain
@@ -182,6 +183,49 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(snapshot.measured_cost, brain.Decimal("0.01"))
         self.assertEqual(snapshot.unresolved_cost, brain.Decimal(0))
 
+    def test_opaque_provider_does_not_receive_inferred_reasoning(self):
+        class Response:
+            def __init__(self, payload):
+                self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.posts = []
+
+            def post(self, endpoint, headers, data, timeout, stream):
+                self.posts.append(json.loads(data))
+                return Response({
+                    "model": "injected/model",
+                    "choices": [{"message": {"role": "assistant", "content": "done"}}],
+                    "usage": {"cost": "0.01"},
+                })
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://opaque.invalid/v1",
+            "LLM_MODEL": "injected/model",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            "MODEL_SPEND_PACING": "adaptive",
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = Session()
+            agent._chat([{"role": "user", "content": "test"}])
+
+        request = agent.s.posts[0]
+        self.assertNotIn("reasoning", request)
+        self.assertNotIn("reasoning_effort", request)
+        self.assertEqual(request["max_tokens"], 4096)
+
     def test_observed_model_substitution_is_terminal_after_accounting(self):
         class Response:
             def __init__(self, payload):
@@ -242,6 +286,69 @@ class BrainTests(unittest.TestCase):
         with patch.dict(os.environ, {"MODEL_BUDGET_USD": "85.01"}, clear=True):
             with self.assertRaisesRegex(ValueError, "outside"):
                 brain._budget_policy()
+
+    def test_budget_pacing_defaults_fixed_high_and_adapts_to_projected_spend(self):
+        snapshot = SimpleNamespace(
+            limit=brain.Decimal("85"),
+            committed_cost=brain.Decimal("80"),
+            started_at=1_000.0,
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            fixed = brain._budget_pace(snapshot, now=4_900.0)
+        self.assertEqual((fixed.posture, fixed.reasoning_effort, fixed.max_tokens), (
+            "fixed-high", "high", 4096,
+        ))
+
+        environment = {
+            "MODEL_SPEND_PACING": "adaptive",
+            "MODEL_BUDGET_WINDOW_SECONDS": "23400",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            behind = brain._budget_pace(
+                SimpleNamespace(**{**snapshot.__dict__, "committed_cost": brain.Decimal("1")}),
+                projected_cost=brain.Decimal("1"),
+                now=4_900.0,
+            )
+            on_target = brain._budget_pace(
+                SimpleNamespace(**{
+                    **snapshot.__dict__, "committed_cost": brain.Decimal("13"),
+                }),
+                projected_cost=brain.Decimal("1"),
+                now=4_900.0,
+            )
+            ahead = brain._budget_pace(
+                SimpleNamespace(**{
+                    **snapshot.__dict__, "committed_cost": brain.Decimal("20"),
+                }),
+                projected_cost=brain.Decimal("1"),
+                now=4_900.0,
+            )
+        self.assertEqual((behind.posture, behind.reasoning_effort), (
+            "behind-target", "high",
+        ))
+        self.assertEqual((on_target.posture, on_target.reasoning_effort), (
+            "on-target", "high",
+        ))
+        self.assertEqual((ahead.posture, ahead.reasoning_effort), (
+            "ahead-of-target", "medium",
+        ))
+        self.assertEqual({behind.max_tokens, on_target.max_tokens, ahead.max_tokens}, {4096})
+        self.assertEqual(on_target.observed_per_minute, brain.Decimal("0.2"))
+
+    def test_budget_pacing_validates_clock_window_and_projected_cost(self):
+        snapshot = SimpleNamespace(
+            limit=brain.Decimal("1"),
+            committed_cost=brain.Decimal(0),
+            started_at=1.0,
+        )
+        with patch.dict(os.environ, {"MODEL_BUDGET_WINDOW_SECONDS": "59"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "allowed range"):
+                brain._budget_pace(snapshot, now=2.0)
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "time must be finite"):
+                brain._budget_pace(snapshot, now=float("nan"))
+            with self.assertRaisesRegex(ValueError, "projected model cost"):
+                brain._budget_pace(snapshot, projected_cost=brain.Decimal("NaN"), now=2.0)
         with patch.dict(os.environ, {"MODEL_CALL_RESERVE_USD": "0.0001"}, clear=True):
             with self.assertRaisesRegex(ValueError, "outside"):
                 brain._budget_policy()

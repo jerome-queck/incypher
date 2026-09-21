@@ -87,7 +87,10 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 self.token = token
 
             def list_challenges(self):
-                return [dict(challenge, solved=False) for challenge in challenges]
+                return [
+                    dict(challenge, solved=challenge.get("solved", False))
+                    for challenge in challenges
+                ]
 
             def challenge(self, cid):
                 return dict(next(
@@ -146,6 +149,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, environment, clear=True),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch.object(
+                    arena_main._OuterCoordinator, "should_continue", return_value=False
+                ),
             ):
                 self.assertEqual(arena_main.main(), 0)
                 self.assertEqual(arena_main.main(), 0)
@@ -193,7 +199,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 solver.run_bash("evidence before crash")
                 raise RuntimeError("synthetic crash")
             return {
-                "solved": False,
+                "solved": True,
                 "steps": 0,
                 "model_calls": 0,
                 "tool_calls": 0,
@@ -288,6 +294,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {"RUNTIME_STATE_PATH": state_path}, clear=True),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch.object(
+                    arena_main._OuterCoordinator, "should_continue", return_value=False
+                ),
             ):
                 self.assertEqual(arena_main.main(), 0)
             connection = sqlite3.connect(state_path)
@@ -340,6 +349,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {"RUNTIME_STATE_PATH": state_path}, clear=True),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch.object(
+                    arena_main._OuterCoordinator, "should_continue", return_value=False
+                ),
             ):
                 self.assertEqual(arena_main.main(), 0)
             connection = sqlite3.connect(state_path)
@@ -382,6 +394,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {"RUNTIME_STATE_PATH": state_path}, clear=True),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch.object(
+                    arena_main._OuterCoordinator, "should_continue", return_value=False
+                ),
             ):
                 self.assertEqual(arena_main.main(), 0)
             connection = sqlite3.connect(state_path)
@@ -393,7 +408,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 connection.close()
         self.assertEqual(outcome, "timeout")
 
-    def test_outer_passes_are_serial_cooled_and_capped_per_challenge(self):
+    def test_outer_passes_are_serial_cooled_until_challenge_solves(self):
         challenge = {
             "id": 21, "name": "multipass", "category": "misc",
             "type": "standard", "value": 100, "files": [],
@@ -418,7 +433,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 )
                 self.assertIs(disposition, FindingDisposition.SAVED)
                 return {
-                    "solved": False, "steps": 1,
+                    "solved": len(calls) == 4, "steps": 1,
                     "model_calls": 1, "tool_calls": 0,
                 }
             finally:
@@ -441,7 +456,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         self.assertEqual(calls, [(21, 6)] * 4)
         self.assertEqual(sleeps, [2.0, 2.0, 2.0])
 
-    def test_duplicate_finding_stops_after_no_semantic_progress(self):
+    def test_duplicate_finding_does_not_remove_unsolved_work_from_queue(self):
         challenge = {
             "id": 22, "name": "duplicate", "category": "misc",
             "type": "standard", "value": 100, "files": [],
@@ -454,7 +469,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 "The parser strips a trailing newline before decoding.",
             )))
             return {
-                "solved": False, "steps": 1,
+                "solved": len(dispositions) == 4, "steps": 1,
                 "model_calls": 1, "tool_calls": 0,
             }
 
@@ -475,7 +490,12 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(
             dispositions,
-            [FindingDisposition.SAVED, FindingDisposition.DUPLICATE],
+            [
+                FindingDisposition.SAVED,
+                FindingDisposition.DUPLICATE,
+                FindingDisposition.DUPLICATE,
+                FindingDisposition.DUPLICATE,
+            ],
         )
 
     def test_saved_finding_enables_second_pass_solve(self):
@@ -523,7 +543,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         self.assertEqual(attempts, [23, 23])
         self.assertEqual(sleeps, [2.0])
 
-    def test_global_model_budget_shrinks_final_slice_and_stops(self):
+    def test_no_arbitrary_run_call_cap_shrinks_configured_slice_budget(self):
         challenges = [
             {"id": challenge_id, "name": f"budget-{challenge_id}",
              "category": "misc", "type": "standard", "value": 100, "files": []}
@@ -543,7 +563,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 FindingDisposition.SAVED,
             )
             return {
-                "solved": False, "steps": max_steps,
+                "solved": True, "steps": max_steps,
                 "model_calls": max_steps, "tool_calls": 0,
             }
 
@@ -567,7 +587,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(allocated, [100, 50])
+        self.assertEqual(allocated, [100, 100, 100])
 
     def test_provider_uncertainty_stops_later_solver_dispatch(self):
         challenges = [
@@ -598,7 +618,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(attempted, [41])
 
-    def test_malformed_provider_message_stops_after_semantic_progress(self):
+    def test_malformed_provider_message_stops_later_solver_dispatch(self):
         challenges = [
             {"id": challenge_id, "name": f"malformed-{challenge_id}",
              "category": "misc", "type": "standard", "value": 100, "files": []}
@@ -631,19 +651,23 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(attempted, [43])
 
-    def test_crashed_slices_charge_model_calls_to_global_cap(self):
-        challenges = [
-            {"id": challenge_id, "name": f"crash-{challenge_id}",
-             "category": "misc", "type": "standard", "value": 100, "files": []}
-            for challenge_id in (71, 72, 73)
-        ]
+    def test_crashed_slices_do_not_shrink_later_configured_slice_budget(self):
+        challenges = [{
+            "id": 71, "name": "crash-retry", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }]
         attempted = []
 
         def solve_challenge(client, ch, max_steps):
             attempted.append((ch["id"], max_steps))
             for _ in range(max_steps):
                 solver.run_bash.record_model_progress()
-            raise RuntimeError("synthetic crash after accepted turns")
+            if len(attempted) < 3:
+                raise RuntimeError("synthetic crash after accepted turns")
+            return {
+                "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 0,
+                "error": "GatewayError: model request failed",
+            }
 
         official, solver = self._harness(
             challenges, solve_challenge, "crash_budget_solver"
@@ -662,10 +686,11 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
                 }, clear=True),
+                patch("arena_main.time.sleep"),
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [(71, 100), (72, 50)])
+        self.assertEqual(attempted, [(71, 100), (71, 100), (71, 100)])
 
     def test_submission_uncertainty_stops_later_solver_dispatch(self):
         challenges = [
@@ -740,17 +765,17 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(attempted, [53])
 
-    def test_total_slice_and_deadline_admission_are_hard_bounded(self):
-        with patch("arena_main.time.monotonic", side_effect=[0.0, 21600.0]):
+    def test_deadline_is_hard_but_slice_count_does_not_abandon_unsolved_work(self):
+        self.assertEqual(arena_main._MAX_RUN_SECONDS, 86_400)
+        with patch("arena_main.time.monotonic", side_effect=[0.0, 86_400.0]):
             deadline = arena_main._OuterCoordinator()
             self.assertEqual(deadline.admit(1, 4), (None, "run deadline"))
 
         slices = arena_main._OuterCoordinator()
-        for challenge_id in range(1, 16):
-            for _ in range(4):
-                self.assertEqual(slices.admit(challenge_id, 1), (1, None))
-        self.assertEqual(slices.total_slices, 60)
-        self.assertEqual(slices.admit(16, 1), (None, "slice budget"))
+        for _ in range(1_000):
+            slices.begin_pass()
+            self.assertEqual(slices.admit(1, 1), (1, None))
+        self.assertEqual(slices.total_slices, 1_000)
 
     def test_attempt_deadline_is_capped_by_outer_run(self):
         challenge = {
@@ -785,6 +810,82 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         self.assertEqual(len(observed), 1)
         self.assertGreater(observed[0], started)
         self.assertLessEqual(observed[0], started + 30.1)
+
+    def test_wrapper_scopes_spend_pacing_and_restores_environment(self):
+        challenge = {
+            "id": 64, "name": "pacing", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }
+
+        for label, initial, validation, observed_value in (
+            ("arena default", {}, False, "adaptive"),
+            ("explicit practice setting", {"MODEL_SPEND_PACING": "fixed_high"},
+             False, "fixed_high"),
+            ("validation default", {}, True, None),
+        ):
+            with self.subTest(label=label):
+                observed = []
+
+                def solve_challenge(client, ch, max_steps):
+                    observed.append(os.environ.get("MODEL_SPEND_PACING"))
+                    return {
+                        "solved": True, "steps": 1,
+                        "model_calls": 1, "tool_calls": 0,
+                    }
+
+                module_name = "scoped_pacing_" + label.replace(" ", "_")
+                official, solver = self._harness(
+                    [challenge], solve_challenge, module_name
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    environment = {
+                        "RUNTIME_STATE_PATH": os.path.join(
+                            directory, "runtime.sqlite3"
+                        ),
+                        **initial,
+                    }
+                    with (
+                        patch.dict(sys.modules, {"main": official, module_name: solver}),
+                        patch.dict(os.environ, environment, clear=True),
+                        patch("arena_main.os.path.isfile", return_value=validation),
+                    ):
+                        self.assertEqual(arena_main.main(), 0)
+                        self.assertEqual(
+                            os.environ.get("MODEL_SPEND_PACING"),
+                            initial.get("MODEL_SPEND_PACING"),
+                        )
+                self.assertEqual(observed, [observed_value])
+
+    def test_wrapper_restores_spend_pacing_after_error(self):
+        challenge = {
+            "id": 65, "name": "pacing-error", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }
+
+        def solve_challenge(client, ch, max_steps):
+            self.fail("wrapper failure should precede solver dispatch")
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "scoped_pacing_error_solver"
+        )
+
+        def failing_main():
+            self.assertEqual(os.environ.get("MODEL_SPEND_PACING"), "adaptive")
+            raise RuntimeError("synthetic wrapper failure")
+
+        official.main = failing_main
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "scoped_pacing_error_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic wrapper failure"):
+                    arena_main.main()
+                self.assertNotIn("MODEL_SPEND_PACING", os.environ)
 
     def test_wrapper_rejects_out_of_range_inherited_step_budget(self):
         challenge = {
@@ -832,7 +933,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             solver.build_prompt(ch, material_directory, [], "synthetic connection")
             solver.run_bash(f"inspect generation {len(calls)}")
             return {
-                "solved": False, "steps": 1,
+                "solved": len(calls) == 4, "steps": 1,
                 "model_calls": 1, "tool_calls": 1,
             }
 
@@ -883,14 +984,18 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         def solve_challenge(client, ch, max_steps):
             attempts.append(ch["id"])
             if ch["id"] == 71:
+                challenges[0]["solved"] = True
                 return {
                     "solved": True, "steps": 1,
                     "model_calls": 1, "tool_calls": 0,
                 }
             if attempts.count(72) == 1:
                 solver.run_bash("inspect mixed challenge")
+            solved = attempts.count(72) == 2
+            if solved:
+                challenges[1]["solved"] = True
             return {
-                "solved": False, "steps": 1,
+                "solved": solved, "steps": 1,
                 "model_calls": 1, "tool_calls": 0,
             }
 
@@ -921,7 +1026,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 self.assertEqual(arena_main.main(), 0)
 
         self.assertEqual(attempts, [71, 72, 72])
-        self.assertEqual(len(pass_results), 2)
+        self.assertEqual(len(pass_results), 3)
         synthesized = next(item for item in pass_results[1] if item.get("id") == 71)
         self.assertTrue(synthesized["solved"])
         self.assertEqual(synthesized["model_calls"], 0)

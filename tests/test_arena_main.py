@@ -13,6 +13,107 @@ from agent_ext.runtime_context import current_attempt
 
 
 class ArenaSelectionTests(unittest.TestCase):
+    def test_catalogue_cache_refreshes_at_five_minutes_and_returns_copies(self):
+        now = [0.0]
+
+        class Delegate:
+            calls = 0
+
+            def list_challenges(self):
+                self.calls += 1
+                return [{"id": 1, "points": 100, "solves": self.calls}]
+
+        delegate = Delegate()
+        cache = arena_main._CatalogueCache(clock=lambda: now[0])
+        first = cache.list_challenges(delegate)
+        first[0]["solves"] = 999
+        now[0] = 299.999
+        self.assertEqual(cache.list_challenges(delegate)[0]["solves"], 1)
+        self.assertEqual(delegate.calls, 1)
+        now[0] = 300.0
+        self.assertEqual(cache.list_challenges(delegate)[0]["solves"], 2)
+        self.assertEqual(delegate.calls, 2)
+
+    def test_refreshed_crowd_counts_reorder_the_next_ranked_catalogue(self):
+        now = [0.0]
+
+        class Delegate:
+            calls = 0
+
+            def list_challenges(self):
+                self.calls += 1
+                if self.calls == 1:
+                    return [
+                        {"id": 1, "points": 100, "solves": 0},
+                        {"id": 2, "points": 100, "solves": 10},
+                    ]
+                return [
+                    {"id": 1, "points": 100, "solves": 20},
+                    {"id": 2, "points": 100, "solves": 10},
+                ]
+
+            def challenge(self, challenge_id):
+                return {"id": challenge_id}
+
+        with tempfile.TemporaryDirectory() as directory:
+            state = arena_main.RuntimeState(os.path.join(directory, "state.sqlite3"))
+            delegate = Delegate()
+            cache = arena_main._CatalogueCache(clock=lambda: now[0])
+            client = arena_main._RankedClient(delegate, state, cache)
+            self.assertEqual([int(item["id"]) for item in client.list_challenges()], [2, 1])
+            now[0] = 299.0
+            self.assertEqual([int(item["id"]) for item in client.list_challenges()], [2, 1])
+            now[0] = 300.0
+            self.assertEqual([int(item["id"]) for item in client.list_challenges()], [1, 2])
+            self.assertEqual(delegate.calls, 2)
+
+    def test_temporary_refresh_failure_keeps_cache_and_backs_off_full_cadence(self):
+        now = [0.0]
+
+        class Delegate:
+            calls = 0
+
+            def list_challenges(self):
+                self.calls += 1
+                if self.calls == 2:
+                    raise OSError("temporary catalogue read failure")
+                return [{"id": 1, "points": 100, "solves": self.calls}]
+
+        delegate = Delegate()
+        cache = arena_main._CatalogueCache(clock=lambda: now[0])
+        self.assertEqual(cache.list_challenges(delegate)[0]["solves"], 1)
+        now[0] = 300.0
+        self.assertEqual(cache.list_challenges(delegate)[0]["solves"], 1)
+        now[0] = 599.999
+        self.assertEqual(cache.list_challenges(delegate)[0]["solves"], 1)
+        self.assertEqual(delegate.calls, 2)
+        now[0] = 600.0
+        self.assertEqual(cache.list_challenges(delegate)[0]["solves"], 3)
+        self.assertEqual(delegate.calls, 3)
+
+    def test_initial_or_malformed_catalogue_failure_still_fails_closed(self):
+        class TemporaryFailure:
+            def list_challenges(self):
+                raise OSError("no trusted snapshot")
+
+        class Malformed:
+            def list_challenges(self):
+                return {"not": "a list"}
+
+        with self.assertRaises(OSError):
+            arena_main._CatalogueCache(clock=lambda: 0).list_challenges(
+                TemporaryFailure()
+            )
+        with self.assertRaisesRegex(RuntimeError, "catalogue changed"):
+            arena_main._CatalogueCache(clock=lambda: 0).list_challenges(Malformed())
+
+    def test_coordinator_runs_one_slice_before_safe_queue_reschedule(self):
+        coordinator = arena_main._OuterCoordinator()
+        self.assertEqual(coordinator.admit(1, 4), (4, None))
+        self.assertEqual(coordinator.admit(2, 4), (None, "queue reschedule"))
+        coordinator.begin_pass()
+        self.assertEqual(coordinator.admit(2, 4), (4, None))
+
     def test_changed_official_hook_fails_before_harness_runs(self):
         official = SimpleNamespace(main=lambda: self.fail("changed harness must be inspected"))
         with patch.dict("sys.modules", {"main": official}):
@@ -78,7 +179,7 @@ class ArenaSelectionTests(unittest.TestCase):
         }, clear=True):
             self.assertEqual(arena_main.main(), 7)
             self.assertEqual(os.environ["ONLY_IDS"], "1,2")
-        self.assertEqual(attempted, [1, 2])
+        self.assertEqual(attempted, [1])
 
     def test_changed_trusted_solver_hook_fails_before_harness_runs(self):
         official = ModuleType("main")
@@ -143,12 +244,15 @@ class ArenaSelectionTests(unittest.TestCase):
             sys.modules, {"main": official, "ranking_solver": solver}
         ), patch.dict(os.environ, {
             "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
-        }, clear=True):
+        }, clear=True), patch.object(
+            arena_main._OuterCoordinator, "should_continue", return_value=False
+        ):
             self.assertEqual(arena_main.main(), 0)
 
         self.assertEqual(detail_ids, [2, 3, 1])
-        self.assertEqual(delegated_ids, [2, 3])
+        self.assertEqual(delegated_ids, [2])
         self.assertEqual(len(results), 3)
+        self.assertIn("queue reschedule", results[1]["error"])
         self.assertEqual(results[-1]["model_calls"], 0)
         self.assertTrue(results[-1]["solved"])
 

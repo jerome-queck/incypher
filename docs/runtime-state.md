@@ -13,8 +13,18 @@ connections, credentials and candidate flags are not persisted.
 - For typed use, build a `ChallengeBrief` for each inherited trusted brief. Dynamic briefs require an
   instance-generation hash; static briefs reject one.
 - `RuntimeState.rank(briefs, now=...)` returns deterministic `RankedChallenge` values.
-  Ordering is unsolved, eligible, points, progress, attempts, static/dynamic, age, then
-  the unchanged numeric challenge ID. Failed slices receive finite 1s then 2s backoff.
+  Ordering is unsolved, eligible, points plus a small crowd-popularity bonus, progress,
+  attempts, static/dynamic, age, then the unchanged numeric challenge ID. The adapter
+  accepts only nonnegative exact-integer catalogue `solves` or `solve_count`; absent or
+  malformed values contribute zero. Each solve adds 20 ranking points, capped after five
+  solves (+100), so challenge points remain material while popular/easier work can move
+  ahead of a repeatedly wasted hard attempt. The production
+  wrapper refreshes that same trusted catalogue at most every five minutes and otherwise
+  reranks a defensive cached copy; it never scrapes a board or contacts challenge targets.
+  A temporary read/timeout after the first trusted snapshot retains that snapshot and
+  waits another full cadence; an initial outage or malformed structure still fails closed.
+  This mutable hint does not enter material or evidence scope hashes. Failed slices
+  receive finite 1s then 2s backoff.
 - Build `brief.scope` once a challenge is admitted. `checkpoint_outcome()` atomically
   records its bounded progress and classified `AttemptOutcome` after each final slice.
 - `record_challenge_progress()` durably advances a ranked challenge after each accepted

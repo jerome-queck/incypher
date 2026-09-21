@@ -35,6 +35,8 @@ MAX_SUMMARY_BYTES = 512
 MAX_SCOPE_OBSERVATIONS = 256
 MAX_TOTAL_OBSERVATIONS = 4096
 _MAX_CHALLENGES = 4096
+_CROWD_SOLVE_BONUS_PER_SOLVE = 20
+_CROWD_SOLVE_COUNT_CAP = 5
 _HASH_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _SECRET_PATTERNS = (
     re.compile(r"(?i)\b(?:flag|ctf)\{[^\r\n}]{1,512}\}"),
@@ -120,6 +122,7 @@ class ChallengeBrief:
     material_hash: str
     instance_hash: str | None = None
     solved: bool = False
+    crowd_solves: int = 0
 
     def __post_init__(self) -> None:
         _challenge_id(self.challenge_id)
@@ -127,6 +130,8 @@ class ChallengeBrief:
             raise ValueError("points must be a nonnegative integer")
         if type(self.solved) is not bool:
             raise ValueError("solved must be boolean")
+        if type(self.crowd_solves) is not int or self.crowd_solves < 0:
+            raise ValueError("crowd_solves must be a nonnegative integer")
         Scope(self.challenge_id, self.material_hash, self.kind, self.instance_hash)
 
     @property
@@ -455,7 +460,11 @@ class RuntimeState:
             item_key = (
                 solved,
                 not eligible,
-                -brief.points,
+                -(
+                    brief.points
+                    + _CROWD_SOLVE_BONUS_PER_SOLVE
+                    * min(brief.crowd_solves, _CROWD_SOLVE_COUNT_CAP)
+                ),
                 -progress,
                 attempts,
                 brief.kind is ChallengeKind.DYNAMIC,
@@ -471,6 +480,12 @@ class RuntimeState:
         challenge_id = _field(brief, "id", _field(brief, "challenge_id"))
         points = _field(brief, "value", _field(brief, "points", 0))
         solved = _field(brief, "solved", False)
+        crowd_solves = 0
+        for field_name in ("solves", "solve_count"):
+            candidate = _field(brief, field_name)
+            if type(candidate) is int and candidate >= 0:
+                crowd_solves = candidate
+                break
         challenge_type = str(
             _field(brief, "type", _field(brief, "challenge_type", ""))
         ).lower()
@@ -492,7 +507,15 @@ class RuntimeState:
             ).encode("ascii")
         ).hexdigest()
         instance = "pending" if kind is ChallengeKind.DYNAMIC else None
-        return ChallengeBrief(challenge_id, points, kind, material, instance, solved)
+        return ChallengeBrief(
+            challenge_id,
+            points,
+            kind,
+            material,
+            instance,
+            solved,
+            crowd_solves,
+        )
 
     def rank_briefs(
         self, briefs: Sequence[object], now: float | None = None

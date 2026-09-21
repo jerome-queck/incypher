@@ -229,6 +229,41 @@ class RuntimeStateTests(unittest.TestCase):
         ordered = self.store.rank_briefs(briefs, now=10.5)
         self.assertIs(ordered[-1], briefs[1])
 
+    def test_catalogue_crowd_solves_adds_small_capped_ranking_bonus(self):
+        briefs = [
+            {"id": 1, "points": 100, "type": "standard", "solves": 1},
+            {"id": 2, "points": 110, "type": "standard", "solve_count": 0},
+            {"id": 3, "points": 0, "type": "standard", "solves": 10_000},
+        ]
+        ordered = self.store.rank_briefs(briefs, now=10)
+        self.assertEqual([brief["id"] for brief in ordered], [1, 2, 3])
+        self.assertIs(ordered[0], briefs[0])
+
+    def test_catalogue_crowd_solves_ignores_absent_or_malformed_values(self):
+        briefs = [
+            {"id": 1, "points": 100, "type": "standard", "solves": True},
+            {"id": 2, "points": 100, "type": "standard", "solves": -1},
+            {"id": 3, "points": 100, "type": "standard", "solves": "99"},
+            {"id": 4, "points": 100, "type": "standard"},
+            {
+                "id": 5,
+                "points": 100,
+                "type": "standard",
+                "solves": "bad",
+                "solve_count": 1,
+            },
+        ]
+        ordered = self.store.rank_briefs(briefs, now=10)
+        self.assertEqual([brief["id"] for brief in ordered], [5, 1, 2, 3, 4])
+
+    def test_catalogue_crowd_solves_do_not_change_scope_hash(self):
+        low = {"id": 7, "points": 100, "type": "standard", "solves": 1}
+        high = {"id": 7, "points": 100, "type": "standard", "solves": 1_000}
+        self.assertEqual(
+            self.store._brief_adapter(low).scope,
+            self.store._brief_adapter(high).scope,
+        )
+
     def test_dynamic_iac_brief_uses_restart_stable_dynamic_rank_scope(self):
         brief = {"id": 8, "points": 500, "type": "dynamic_iac", "solved": False}
         self.assertIs(self.store.rank_briefs([brief], now=10)[0], brief)

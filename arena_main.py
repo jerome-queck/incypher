@@ -7,6 +7,7 @@ import ast
 import hashlib
 import importlib
 import inspect
+import math
 import os
 import textwrap
 import time
@@ -45,11 +46,10 @@ _OFFICIAL_AST = {
     "is_practice": "d6e6b7c08dbe14b5094e557787c911c792e488ba163fbb11f10f36772371aa05",
     "client_init": "40b975045df8353cd811139e3fdd9266f976daa68c416e7a0db5a5aa92552b2c",
 }
-_MAX_SLICES_PER_CHALLENGE = 4
-_MAX_TOTAL_SLICES = 60
-_MAX_MODEL_CALLS = 150
-_MAX_RUN_SECONDS = 6 * 60 * 60
+_MAX_SLICE_MODEL_CALLS = 150
+_MAX_RUN_SECONDS = 24 * 60 * 60
 _PASS_COOLDOWN_SECONDS = 2.0
+_CATALOGUE_REFRESH_SECONDS = 300.0
 
 
 def _require_signature(function, names, label):
@@ -92,16 +92,60 @@ class _RankedId(int):
         return int.__lt__(self, other)
 
 
+class _CatalogueCache:
+    """Bound trusted catalogue reads while allowing local reranking every slice."""
+
+    def __init__(self, clock=None):
+        self._clock = clock or time.monotonic
+        self._briefs: tuple[dict, ...] | None = None
+        self._refresh_at = 0.0
+
+    def list_challenges(self, delegate) -> list[dict]:
+        now = float(self._clock())
+        if not math.isfinite(now):
+            raise RuntimeError("Catalogue clock changed; inspect runtime")
+        if self._briefs is None or now >= self._refresh_at:
+            try:
+                briefs = delegate.list_challenges()
+            except (OSError, TimeoutError):
+                if self._briefs is None:
+                    raise
+                self._refresh_at = now + _CATALOGUE_REFRESH_SECONDS
+                return [dict(item) for item in self._briefs]
+            if not isinstance(briefs, list) or any(
+                not isinstance(item, Mapping) for item in briefs
+            ):
+                raise RuntimeError("Official challenge catalogue changed; inspect base contract")
+            self._briefs = tuple(dict(item) for item in briefs)
+            self._refresh_at = now + _CATALOGUE_REFRESH_SECONDS
+        return [dict(item) for item in self._briefs]
+
+    def mark_solved(self, challenge_id: int) -> None:
+        if type(challenge_id) is not int or challenge_id <= 0 or self._briefs is None:
+            return
+        updated = []
+        for brief in self._briefs:
+            copied = dict(brief)
+            if copied.get("id") == challenge_id:
+                copied["solved"] = True
+            updated.append(copied)
+        self._briefs = tuple(updated)
+
+
 class _RankedClient:
-    def __init__(self, delegate, state: RuntimeState):
+    def __init__(
+        self,
+        delegate,
+        state: RuntimeState,
+        catalogue: _CatalogueCache | None = None,
+    ):
         self._delegate = delegate
         self._state = state
+        self._catalogue = catalogue or _CatalogueCache()
         self._solved: set[int] = set()
 
     def list_challenges(self):
-        briefs = self._delegate.list_challenges()
-        if not isinstance(briefs, list) or any(not isinstance(item, Mapping) for item in briefs):
-            raise RuntimeError("Official challenge catalogue changed; inspect base contract")
+        briefs = self._catalogue.list_challenges(self._delegate)
         ordered = self._state.rank_briefs(briefs)
         ranked = []
         self._solved = set()
@@ -123,6 +167,9 @@ class _RankedClient:
 
     def trusted_solved(self, challenge_id: int) -> bool:
         return int(challenge_id) in self._solved
+
+    def mark_solved(self, challenge_id: int) -> None:
+        self._catalogue.mark_solved(challenge_id)
 
     def __getattr__(self, name):
         return getattr(self._delegate, name)
@@ -148,7 +195,6 @@ class _StatefulShell:
         self._failure: AttemptOutcome | None = None
         self._progress = 0
         self._model_progress = 0
-        self._semantic_progress = 0
 
     def _get_shell(self) -> ManagedShell:
         if self._shell is None:
@@ -194,8 +240,6 @@ class _StatefulShell:
         if recorded:
             self._state.record_challenge_progress(context.challenge_id)
             self._progress += 1
-            if has_payload and status == "ok":
-                self._semantic_progress += 1
 
     def record_model_progress(self) -> None:
         context = current_attempt(required=True)
@@ -209,7 +253,6 @@ class _StatefulShell:
         if disposition is FindingDisposition.SAVED:
             self._state.record_challenge_progress(context.challenge_id)
             self._progress += 1
-            self._semantic_progress += 1
         return disposition
 
     def __call__(self, command: str) -> str:
@@ -269,11 +312,6 @@ class _StatefulShell:
     def model_progress(self) -> int:
         return self._model_progress
 
-    @property
-    def semantic_progress(self) -> int:
-        return self._semantic_progress
-
-
 def _failure_class(result: Mapping, shell: _StatefulShell) -> AttemptOutcome:
     error = str(result.get("error", "")).lower()
     if "timeout" in error:
@@ -330,8 +368,6 @@ class _OuterCoordinator:
 
     def __init__(self):
         self.deadline = time.monotonic() + _MAX_RUN_SECONDS
-        self.slice_counts: dict[int, int] = {}
-        self.solved: set[int] = set()
         self.total_slices = 0
         self.model_calls = 0
         self.stop_reason: str | None = None
@@ -340,45 +376,30 @@ class _OuterCoordinator:
     def begin_pass(self) -> None:
         self.pass_calls = 0
         self.pass_slices = 0
-        self.pass_semantic_progress = False
         self.pass_all_solved = True
         self.pass_seen: set[int] = set()
 
     def note_catalogue_solved(self, challenge_id: int) -> None:
         self.pass_calls += 1
         self.pass_seen.add(challenge_id)
-        self.solved.add(challenge_id)
 
     def admit(self, challenge_id: int, max_steps: int) -> tuple[int | None, str | None]:
         self.pass_calls += 1
         self.pass_seen.add(challenge_id)
-        if challenge_id in self.solved:
-            return None, "solved"
         if self.stop_reason is not None:
             self.pass_all_solved = False
             return None, self.stop_reason
         if time.monotonic() >= self.deadline:
             self.stop_reason = "run deadline"
-        elif self.total_slices >= _MAX_TOTAL_SLICES:
-            self.stop_reason = "slice budget"
-        elif self.model_calls >= _MAX_MODEL_CALLS:
-            self.stop_reason = "model-call budget"
-        elif self.slice_counts.get(challenge_id, 0) >= _MAX_SLICES_PER_CHALLENGE:
-            self.pass_all_solved = False
-            return None, "challenge slice budget"
         if self.stop_reason is not None:
             self.pass_all_solved = False
             return None, self.stop_reason
-        remaining_calls = _MAX_MODEL_CALLS - self.model_calls
-        allocated_steps = min(max_steps, remaining_calls)
-        if allocated_steps <= 0:
-            self.stop_reason = "model-call budget"
+        if self.pass_slices:
             self.pass_all_solved = False
-            return None, self.stop_reason
-        self.slice_counts[challenge_id] = self.slice_counts.get(challenge_id, 0) + 1
+            return None, "queue reschedule"
         self.total_slices += 1
         self.pass_slices += 1
-        return allocated_steps, None
+        return max_steps, None
 
     def note_result(
         self,
@@ -386,38 +407,22 @@ class _OuterCoordinator:
         *,
         solved: bool,
         model_calls: int,
-        semantic_progress: bool,
         outcome: AttemptOutcome,
     ) -> None:
         self.model_calls += model_calls
-        if self.model_calls >= _MAX_MODEL_CALLS:
-            self.stop_reason = "model-call budget"
         if time.monotonic() >= self.deadline:
             self.stop_reason = "run deadline"
         if outcome is AttemptOutcome.PROVIDER:
             self.stop_reason = "provider uncertainty"
         elif outcome is AttemptOutcome.SUBMISSION:
             self.stop_reason = "submission uncertainty"
-        if solved:
-            self.solved.add(challenge_id)
-        else:
+        if not solved:
             self.pass_all_solved = False
-        self.pass_semantic_progress |= semantic_progress
 
     def should_continue(self) -> bool:
         if self.stop_reason is not None:
             return False
         if self.pass_calls == 0 or self.pass_slices == 0 or self.pass_all_solved:
-            return False
-        if not self.pass_semantic_progress:
-            return False
-        if self.total_slices >= _MAX_TOTAL_SLICES or self.model_calls >= _MAX_MODEL_CALLS:
-            return False
-        if all(
-            challenge_id in self.solved
-            or self.slice_counts.get(challenge_id, 0) >= _MAX_SLICES_PER_CHALLENGE
-            for challenge_id in self.pass_seen
-        ):
             return False
         return time.monotonic() + _PASS_COOLDOWN_SECONDS < self.deadline
 
@@ -474,9 +479,10 @@ def main():
     admission = Admission(Capacity(512 * 1024 * 1024, 64, active=2, heavy=1, queued=8))
     validation_selector = os.path.isfile("/opt/agent/.validation-id")
     coordinator = _OuterCoordinator()
+    catalogue = _CatalogueCache()
 
     def client_factory(base, token):
-        return _RankedClient(inherited_client(base, token), state)
+        return _RankedClient(inherited_client(base, token), state, catalogue)
 
     def scoped_build_prompt(ch, cdir, filenames, conn):
         context = bind_prepared_material(ch, cdir, filenames, conn)
@@ -492,7 +498,7 @@ def main():
             type(cid) is not int
             or cid <= 0
             or type(max_steps) is not int
-            or not 1 <= max_steps <= _MAX_MODEL_CALLS
+            or not 1 <= max_steps <= _MAX_SLICE_MODEL_CALLS
         ):
             raise RuntimeError("Official solve arguments changed; inspect base contract")
         if not validation_selector and isinstance(client, _RankedClient) and client.trusted_solved(cid):
@@ -501,8 +507,6 @@ def main():
             state.record_challenge_outcome(int(cid), True, 0, AttemptOutcome.UNSOLVED)
             return result
         allocated_steps, deferred = coordinator.admit(cid, max_steps)
-        if deferred == "solved":
-            return _solved_result(ch)
         if deferred is not None:
             return _deferred_result(ch, deferred)
         assert allocated_steps is not None
@@ -525,7 +529,6 @@ def main():
                     cid,
                     solved=False,
                     model_calls=observed_model_calls,
-                    semantic_progress=shell.semantic_progress > 0,
                     outcome=AttemptOutcome.CRASH,
                 )
                 return {
@@ -570,12 +573,13 @@ def main():
             int(cid), solved, progress,
             outcome,
         )
+        if solved and isinstance(client, _RankedClient):
+            client.mark_solved(int(cid))
         state.checkpoint()
         coordinator.note_result(
             cid,
             solved=solved,
             model_calls=observed_model_calls,
-            semantic_progress=solved or shell.semantic_progress > 0,
             outcome=outcome,
         )
         return result
@@ -584,7 +588,11 @@ def main():
     official_main.CTFdClient = client_factory
     official_main.solve_challenge = scoped_solve
     solver_module.build_prompt = scoped_build_prompt
+    pacing_was_set = "MODEL_SPEND_PACING" in os.environ
+    pacing_before = os.environ.get("MODEL_SPEND_PACING")
     try:
+        if not validation_selector and not pacing_was_set:
+            os.environ["MODEL_SPEND_PACING"] = "adaptive"
         while True:
             coordinator.begin_pass()
             return_code = official_main.main()
@@ -597,6 +605,11 @@ def main():
         official_main.solve_challenge = inherited_solve
         solver_module.build_prompt = inherited_build_prompt
         solver_module.run_bash = inherited_run_bash
+        if pacing_was_set:
+            assert pacing_before is not None
+            os.environ["MODEL_SPEND_PACING"] = pacing_before
+        else:
+            os.environ.pop("MODEL_SPEND_PACING", None)
 
 
 if __name__ == "__main__":

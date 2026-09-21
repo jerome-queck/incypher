@@ -6,12 +6,14 @@ flags returned as either tool calls or assistant text.
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import re
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -120,7 +122,19 @@ _MAX_PROVIDER_RESPONSE_BYTES = 8 * 1024 * 1024
 _MODEL_BUDGET_MAX_USD = Decimal("85")
 _OPAQUE_RESERVE_MIN_USD = Decimal("0.05")
 _OPAQUE_RESERVE_MAX_USD = Decimal("5")
+_MODEL_KEYS = ("LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY")
+_DEFAULT_BUDGET_WINDOW_SECONDS = 6.5 * 60 * 60
 _DISCOVERY_CACHE = DiscoveryCache()
+
+
+@dataclass(frozen=True)
+class BudgetPace:
+    reasoning_effort: str
+    max_tokens: int
+    posture: str
+    target_spend: Decimal
+    target_per_minute: Decimal
+    observed_per_minute: Decimal
 
 
 def _clip_utf8(value: str, maximum: int) -> str:
@@ -240,6 +254,68 @@ def _budget_policy() -> tuple[Decimal, Decimal]:
     )
 
 
+def _budget_window_seconds() -> float:
+    raw = os.environ.get(
+        "MODEL_BUDGET_WINDOW_SECONDS", str(int(_DEFAULT_BUDGET_WINDOW_SECONDS))
+    )
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("MODEL_BUDGET_WINDOW_SECONDS must be finite") from None
+    if not 60 <= value <= 24 * 60 * 60:
+        raise ValueError("MODEL_BUDGET_WINDOW_SECONDS is outside the allowed range")
+    return value
+
+
+def _budget_pace(
+    snapshot,
+    *,
+    projected_cost: Decimal = Decimal(0),
+    now: float | None = None,
+) -> BudgetPace:
+    mode = os.environ.get("MODEL_SPEND_PACING", "fixed_high")
+    if mode not in {"adaptive", "fixed_high"}:
+        raise ValueError("MODEL_SPEND_PACING must be adaptive or fixed_high")
+    if (
+        not isinstance(projected_cost, Decimal)
+        or not projected_cost.is_finite()
+        or projected_cost < 0
+    ):
+        raise ValueError("projected model cost must be a finite nonnegative decimal")
+    window = _budget_window_seconds()
+    instant = time.time() if now is None else float(now)
+    if not isinstance(instant, float) or not math.isfinite(instant):
+        raise ValueError("budget pacing time must be finite")
+    elapsed = max(0.0, instant - snapshot.started_at)
+    fraction = min(1.0, elapsed / window)
+    target = snapshot.limit * Decimal(str(fraction))
+    per_minute = snapshot.limit / Decimal(str(window / 60.0))
+    observed_minutes = Decimal(str(max(1.0, elapsed / 60.0)))
+    observed_per_minute = snapshot.committed_cost / observed_minutes
+    if mode == "fixed_high":
+        return BudgetPace(
+            "high", 4096, "fixed-high", target, per_minute, observed_per_minute
+        )
+    grace = min(300.0, window / 20.0)
+    if elapsed <= grace or target <= Decimal("0.01"):
+        return BudgetPace(
+            "high", 4096, "starting", target, per_minute, observed_per_minute
+        )
+    projected = snapshot.committed_cost + projected_cost
+    if projected < target * Decimal("0.75"):
+        return BudgetPace(
+            "high", 4096, "behind-target", target, per_minute, observed_per_minute
+        )
+    if projected > target * Decimal("1.25"):
+        return BudgetPace(
+            "medium", 4096, "ahead-of-target", target, per_minute,
+            observed_per_minute,
+        )
+    return BudgetPace(
+        "high", 4096, "on-target", target, per_minute, observed_per_minute
+    )
+
+
 def _observed_identity_matches(configured: str, observed: str, discovery) -> bool:
     if observed == configured:
         return True
@@ -305,9 +381,57 @@ class Brain:
         if self.verbose:
             print("   ", *(_redact(str(part)) for part in parts), flush=True)
 
+    def _ensure_ledger(self) -> BudgetLedger:
+        if self._ledger is None:
+            budget_limit, self._opaque_reserve = _budget_policy()
+            self._ledger = BudgetLedger(
+                os.environ.get("MODEL_BUDGET_PATH", "/work/model-budget.sqlite3"),
+                budget_limit,
+            )
+        return self._ledger
+
+    def _budget_notice(self) -> str:
+        if not all(os.environ.get(key, "").strip() for key in _MODEL_KEYS):
+            return ""
+        trusted = current_attempt()
+        if trusted is not None and trusted.deadline_monotonic <= time.monotonic():
+            return ""
+        snapshot = self._ensure_ledger().snapshot()
+        pace = _budget_pace(snapshot)
+        supported = (
+            set(self._discovery.capabilities.optional_parameters)
+            if self._discovery is not None
+            else set()
+        )
+        if self._discovery is None:
+            reasoning = f"reasoning target {pace.reasoning_effort}, capability pending"
+        elif supported & {"reasoning", "reasoning_effort"}:
+            reasoning = f"reasoning {pace.reasoning_effort}"
+        else:
+            reasoning = "reasoning adjustment unsupported"
+        return (
+            f" Durable model budget: ${snapshot.available:.2f} available of "
+            f"${snapshot.limit:.2f}; ${snapshot.committed_cost:.2f} committed versus "
+            f"${pace.target_spend:.2f} target by now "
+            f"(${pace.observed_per_minute:.3f}/minute observed; "
+            f"${pace.target_per_minute:.3f}/minute target). "
+            f"Spend posture {pace.posture}; {reasoning}."
+        )
+
     def _chat(self, messages):
         config = LLMConfig.from_environment(os.environ)
         identity = ProviderIdentity(config.chat_url, config.api_key, config.model)
+
+        trusted = current_attempt()
+        timeout = float(os.environ.get("MODEL_TIMEOUT_SECONDS", "120"))
+        if trusted is not None:
+            remaining = trusted.deadline_monotonic - time.monotonic()
+            if remaining <= 0:
+                raise GatewayError("attempt deadline exhausted")
+            timeout = min(timeout, remaining)
+
+        ledger = self._ensure_ledger()
+        snapshot = ledger.snapshot()
 
         def fetch_json(url, timeout_seconds, maximum_bytes):
             return _bounded_get(self.s, url, timeout_seconds, maximum_bytes)
@@ -323,13 +447,6 @@ class Brain:
             supported.add("max_tokens")
         capabilities = ProviderCapabilities(frozenset(supported))
 
-        trusted = current_attempt()
-        timeout = float(os.environ.get("MODEL_TIMEOUT_SECONDS", "120"))
-        if trusted is not None:
-            remaining = trusted.deadline_monotonic - time.monotonic()
-            if remaining <= 0:
-                raise GatewayError("attempt deadline exhausted")
-            timeout = min(timeout, remaining)
         if self._gateway is None:
 
             def transport(endpoint, headers, body, timeout_seconds):
@@ -345,13 +462,6 @@ class Brain:
             self._gateway = ModelGateway(transport, timeout_seconds=timeout)
         elif not self._gateway.dispatch_active:
             self._gateway.timeout_seconds = timeout
-        if self._ledger is None:
-            budget_limit, self._opaque_reserve = _budget_policy()
-            self._ledger = BudgetLedger(
-                os.environ.get("MODEL_BUDGET_PATH", "/work/model-budget.sqlite3"),
-                budget_limit,
-            )
-
         self.model_calls += 1
         call_id = (
             trusted.call_id(self.model_calls)
@@ -361,26 +471,37 @@ class Brain:
         bounded = _bounded_messages(messages)
         prompt_tokens = max(1, len(json.dumps(bounded, ensure_ascii=False).encode("utf-8")) // 4)
         estimated = estimate_max_cost(
-            self._discovery.pricing, prompt_tokens=prompt_tokens, completion_tokens=4096
+            self._discovery.pricing,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=4096,
         )
         if estimated is not None:
             maximum = max(Decimal("0.05"), estimated * Decimal("1.5"))
         else:
             assert self._opaque_reserve is not None
             maximum = self._opaque_reserve
-        reservation = self._ledger.reserve(call_id, maximum)
+        pace = _budget_pace(snapshot, projected_cost=maximum)
+        reasoning_effort = (
+            pace.reasoning_effort
+            if supported & {"reasoning", "reasoning_effort"}
+            else None
+        )
+        reservation = ledger.reserve(call_id, maximum)
         if not reservation.admitted:
             raise GatewayError("model budget exhausted")
         response = self._gateway.complete(
             identity,
             bounded,
             capabilities,
-            RequestOptions(max_tokens=4096, reasoning_effort="high"),
+            RequestOptions(
+                max_tokens=pace.max_tokens,
+                reasoning_effort=reasoning_effort,
+            ),
             tools=self._tools,
             tool_choice="auto",
             estimated_cost=estimated,
         )
-        self._ledger.settle(call_id, response.usage)
+        ledger.settle(call_id, response.usage)
         observed = response.observed_model
         if observed is not None and not _observed_identity_matches(
             config.model, observed, self._discovery
@@ -453,6 +574,7 @@ class Brain:
                 f"{remaining_tools} shell/checkpoint calls remain. "
                 "Use the smallest decisive next action."
             )
+            budget_notice += self._budget_notice()
             if steps == self.max_steps:
                 budget_notice += (
                     " Final model turn: submit only a verified candidate; otherwise use any "

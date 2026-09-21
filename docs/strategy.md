@@ -75,11 +75,20 @@ preserves uncertainty. Cleanup failure does not erase a definitive outcome.
 Deadlines are cooperative around synchronous callbacks; a 30-second budget cannot
 force-stop a 180-second HTTP request. Production hard limits need cancellable/bounded
 callbacks and a tested cleanup path. The active wrapper uses the exact guarded inherited
-main as its authorized selection seam: serial passes, at most four slices per challenge,
-60 slices and 150 model calls per run, six hours total, and a two-second cooldown. Another
-pass requires an accepted solve, useful new shell evidence, or saved typed finding;
-provider/submission uncertainty is terminal. The inherited main remains the sole
-lifecycle, submission and results owner.
+main as its authorized selection seam. Each inherited pass admits one strictly bounded
+`MAX_STEPS` slice, defers every other unstarted challenge, then returns all still-unsolved
+work to the serial queue after a two-second cooldown. This gives each completed slice a
+fresh local ranking decision without overlapping dynamic lifecycles. The wrapper refreshes
+the inherited trusted catalogue at most every five minutes; intervening passes rerank a
+defensive cached copy, and accepted solves update only that cache until the next refresh.
+Temporary catalogue read failures retain the prior trusted snapshot for one full cadence;
+initial or malformed reads fail closed. It does not scrape a board or contact challenge
+targets. There is no separate cumulative
+slice or call-count cutoff: durable model-dollar admission and a 24-hour process safety
+bound govern the run. The separate 6.5-hour pacing window is a soft spend target toward
+the competition horizon, not the process lifetime or dollar ceiling. All-solved/empty,
+provider/submission uncertainty, or an inherited nonzero return is terminal. The inherited
+main remains the sole lifecycle, submission and results owner.
 
 ## Verification and integration gate
 

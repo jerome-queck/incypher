@@ -45,6 +45,18 @@ allowance unadmitted for recovery/verification. The ceiling cannot exceed USD 85
 reservations must remain USD 0.05–5. Optional environment tuning is bounded;
 Day 2 still requires only the organiser's injected model triplet.
 
+The ledger also stores its first-start wall time. Arena mode compares durable measured,
+estimated and unresolved spend, plus the next conservative reservation, with a linear
+budget target over `MODEL_BUDGET_WINDOW_SECONDS` (default 23,400 seconds). It requests
+high reasoning while starting, on pace or behind, and medium while materially ahead;
+completion capacity remains 4,096 tokens in every posture. The reasoning field is sent
+only when exact-model discovery advertises `reasoning` or `reasoning_effort`. Local
+practice, validation and direct Brain use default to fixed high; only the arena wrapper
+enables adaptive pacing when no explicit mode was supplied. Pacing changes request
+intensity, never the configured model identity or durable dollar ceiling.
+Each model-facing budget notice reports both the durable average spend per elapsed minute
+and the target rate; the posture compares cumulative projected spend with the target.
+
 Limits: there is no generic provider meter or generation-ID reconciliation in the image;
 the SQLite file is not encrypted; a timed-out transport thread cannot be forcibly killed;
 and a missing usage record remains fully reserved. A late measured cost may exceed its
