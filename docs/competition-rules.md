@@ -81,9 +81,12 @@ The technical submission requirements below are from
 | Day 1 | Own LLM configuration; no injected model variables |
 | Day 2 | Read organiser-injected `LLM_BASE_URL` and `LLM_API_KEY`; the image supplies/selects `LLM_MODEL` for the compatible endpoint |
 | Testing | Bundled `check_agent.sh`; structural pass does not establish solving |
-| Cost | Every re-upload after the first scored run begins costs 100 points; the live board applies this during Day 1 too |
+| Cost | Day 1 development re-uploads carry no penalty; from Day 2, every re-upload after the first scored run begins costs 100 points |
 
-The latest image waits while a prior run is active. `done` means results collected;
+The current usage guide says a newer push replaces a still-running container at the next
+cycle after collecting written results. The status legend instead says `queued (new)`
+starts once the prior run finishes; the board does not expose an active image digest,
+so actual pickup cannot be inferred from a running row. `done` means results collected;
 `running` means container alive; `collecting` means exited awaiting collection.
 `pull-failed`, `no-token`, `run-failed`, `exited(N)` and `lost` are failures.
 A re-run form notifies organisers and is an intervention, not passive status checking.
@@ -109,7 +112,7 @@ A shell tool alone does not establish that PoW has been handled.
 | Model | PDF p. 21 + Imperial: any model. Current usage injects endpoint/key but leaves model selection to the image | Honor injected Day-2 endpoint/key; choose only a model advertised by that endpoint |
 | Cadence | Usage: 30 minutes. Live submit/status/scores: 5 minutes, up to two cycles/~10 minutes to collect | Use current live timestamps for observation; never assume immediate rerun |
 | Duration | Usage: no container wall timer. PDF: fixed event finish and token exhaustion | Runtime may persist; scoring still has an event deadline. No evidence points after finish count |
-| Restart/re-upload | PDF penalizes organiser restart; usage penalizes re-upload | Avoid both during scoring; combined/double-charge semantics unknown |
+| Restart/re-upload | PDF penalizes organiser restart; current usage explicitly makes Day 1 re-uploads free and Day 2 re-uploads after scoring cost 100 | Avoid both during Day 2 scoring; combined/double-charge semantics unknown |
 | Kit timing | Imperial agenda: kit 14 Sep. Platform: kit 21 Sep | Inspect the actual latest base; historical date does not establish version |
 | Scoring | Slides give points/time; board separates VALID/SCORE | Track VALID and penalties independently; exact final net formula, equal-time ordering and invalid-attribution policy unconfirmed |
 

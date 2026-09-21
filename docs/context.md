@@ -18,7 +18,7 @@ were merged. No open PR contained the requested general practice-selection chang
 | --- | --- | --- |
 | `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; live persistent serial queue | One bounded solve slice per inherited pass, then local rerank/requeue; five-minute catalogue/public-crowd refresh; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
-| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, packaged 16-call/runtime-overridable `MAX_STEPS` slice cap, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
+| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, packaged 24-call/runtime-overridable `MAX_STEPS` slice cap in the next local candidate, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
 | `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, Day-2 served-model discovery and durable conservative ledger; candidate requests high/medium reasoning only when discovered as supported and paces cumulative spend against a configurable window; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
@@ -42,6 +42,15 @@ per-slice inherited `MAX_STEPS` and dollar governor, and adds durable adaptive s
 PR #18 merged bounded five-minute public crowd signals, fail-closed Day-2 model
 discovery, unresolved-dispatch shutdown and scoped submission reconciliation. PR #19
 merged the measured 16-model/20-tool packaged slice; its Day-1 image is push #22.
+The next local candidate widens only the packaged per-slice horizon to 24/28; its
+fresh synthetic P2 trial B30 passed in 5/5 calls/tools, below the previous 16/20
+ceilings, so the larger bound's benefit remains unproven until live or comparative
+evidence. Clean AMD64 Day-2 image
+`sha256:e691820e47e36d038ec13b3bbb7736827862dfe1dbb87eeacb6d57fbfba9e8c2`
+passed checker 6/0/2, 369 non-entrypoint tests inside the non-root read-only
+2CPU/2GiB/256PID sandbox with ResourceWarnings fatal, and the 375-test host suite
+with 25 expected platform skips; it has no Day-1 credential/validation selector
+and is not the registry image. Do not conflate the unpushed candidate with push #22.
 
 ## Evidence and release identity
 
@@ -49,8 +58,9 @@ merged the measured 16-model/20-tool packaged slice; its Day-1 image is push #22
   `sha256:44065c5107ddcbc132932e32563b04c7d10bf60cb07116c2b4ec9e3b2fd0166e`,
   began scoring at 03:10 SGT and earned eleven fresh
   arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
-  persistent solving and queue rotation. The board now explicitly charges 100 points for
-  every re-upload after the first scored run begins. At 04:15 the explicitly requested
+  persistent solving and queue rotation. The updated usage/status pages now explicitly
+  make Day 1 development re-uploads free; the 100-point charge starts on Day 2 after
+  the first scored run begins. At 04:15 the explicitly requested
   replacement push #21 registered immediately; the registry confirms exact Day-1 digest
   `sha256:c7c21321634911e86d20d4b8eb2d1c6d2a314d88d2ad30524e08c209425e76d4`.
   At 04:30 the public row remained `running`, 11/15 and penalty 0. It does not expose
@@ -58,8 +68,10 @@ merged the measured 16-model/20-tool packaged slice; its Day-1 image is push #22
   04:30:59 now makes the independently verified remote `latest`
   `sha256:d7c560ff5bdbd40724f802e006d3d1835f5308c912a9fcb7e8b847009afd7f07`.
   At the 04:35 cycle the board remained RUNNING at 11/15, 2,250 VALID, rank 2 and
-  penalty 0. It registered push count 22 but still exposed no active digest or new solve;
-  actual pickup remains unproven.
+  penalty 0. At 04:40 the row remains RUNNING at 11/15 and penalty 0. It registered
+  push count 22 but still exposed no active digest or new solve; actual pickup remains
+  unproven. Current usage says replacement of a running container happens after
+  collecting its written results at a cycle, while the status legend conflicts.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -205,6 +217,7 @@ holds detailed cost, experiment and provenance records. Current priorities:
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
    controls active. Make a new image only after a bounded, measured capability change;
+   Day 1 re-uploads are free, but do not interpret registration as pickup. Day 2
    re-uploads can cost 100 points. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
    fresh base/contract drift, and follow [release gates](setup.md#day-2-release). Do not
