@@ -136,12 +136,12 @@ class BrainTests(unittest.TestCase):
         replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
             "name": "run_bash", "arguments": json.dumps({"command": f"inspect-{index}"}),
         }}]} for index in range(1, 4)]
-        agent = CapturingBrain(
-            replies, run_bash=Mock(return_value="new evidence"), submit_flag=Mock(),
-            max_steps=3, verbose=False,
-        )
-
-        result = agent.solve("synthetic")
+        with patch.dict(os.environ, {"MAX_TOOL_CALLS": "12"}):
+            agent = CapturingBrain(
+                replies, run_bash=Mock(return_value="new evidence"), submit_flag=Mock(),
+                max_steps=3, verbose=False,
+            )
+            result = agent.solve("synthetic")
 
         self.assertEqual(result["final"], "step budget exhausted")
         self.assertIn("model turn 1/3", agent.requests[0][-1]["content"])

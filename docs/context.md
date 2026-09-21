@@ -89,12 +89,12 @@ separate 16/20 packaged-slice candidate is under local verification.
   02:15:46, then changed to `collecting` by 02:18:20 with 0/15 and penalty 0. This is
   a real early process exit; the queued runtime still contains the old no-progress stop
   that the current candidate removes. Read `/scores` and `/status` again for collection.
-- Verified remote `latest` is the metadata-distinct Day-1 AMD64 digest
+- Historical push #15 had the metadata-distinct Day-1 AMD64 digest
   `sha256:a9ecc2d9192eab938c6c34d51107ecd3ef338e64f52a98a84eb484d165ce8725`.
   It embeds only the model triplet plus a USD 19/fixed-high policy, has no CTF token or
   validation selector, passes checker 6/0/2, and its exact in-image harness/practice
-  guards pass. The queued runtime source is `a43e59b`; newer local queue/pacing work is
-  not in that image.
+  guards pass. Its queued runtime source was `a43e59b`; it is no longer registry
+  `latest` after push #21.
 - Source docs previously called an older digest “current.” That is historical evidence
   only: public status does not identify the deployed digest or its source commit.
 - [Arena contract](arena-contract.md) records an earlier inspected base/harness.
