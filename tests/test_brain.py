@@ -330,6 +330,13 @@ class BrainTests(unittest.TestCase):
         self.assertFalse(brain._observed_identity_matches(
             "openai/model", "openai/model-20260902", discovery
         ))
+        compatible = DiscoveryResult(
+            brain.ProviderCapabilities(), None, "compatible_catalogue",
+            "compatible_catalogue", "served/model-20260901",
+        )
+        self.assertTrue(brain._observed_identity_matches(
+            "served/model", "served/model-20260901", compatible
+        ))
         opaque = DiscoveryResult(
             brain.ProviderCapabilities(), None, "opaque", "unknown", None
         )

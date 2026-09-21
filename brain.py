@@ -333,7 +333,7 @@ def _observed_identity_matches(configured: str, observed: str, discovery) -> boo
     if observed == configured:
         return True
     return (
-        discovery.provenance == "openrouter_catalogue"
+        discovery.provenance in {"openrouter_catalogue", "compatible_catalogue"}
         and discovery.canonical_model is not None
         and observed == discovery.canonical_model
     )
