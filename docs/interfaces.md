@@ -63,16 +63,14 @@ Model calls default to 120 seconds and are also bounded by the trusted eight-min
 attempt deadline. The compatible managed shell retains `/bin/bash -lc` but streams both
 outputs to a 12 KB cap, uses 45-second ordinary/90-second heavy bounds within the attempt
 deadline, and reaps process groups. Brain step, tool, submission and USD admission limits
-are finite. The inherited `MAX_STEPS` value is the per-slice model-call cap (1–150);
-trusted point metadata does not silently replace it. The outer coordinator still limits
-the whole run to 150 model calls. The gateway returns on its
+are finite. The inherited `MAX_STEPS` value is the strictly validated per-slice model-call
+cap; trusted point metadata does not silently replace it. Coordinator limits and
+continuation rules are authoritative in [strategy.md](strategy.md). The gateway returns on its
 deadline and blocks overlapping dispatch while an unresolved transport worker remains;
 Python cannot forcibly cancel that worker. Shell work may overlap through at most two
 attempt-scoped handles; model conversations and inherited challenge lifecycles remain serial.
-The wrapper can rerun the exact inherited main serially only after an accepted solve, useful
-new shell evidence or saved finding. It stops on provider/submission uncertainty and after
-four slices per challenge, 60 slices, 150 model calls or six hours; passes cool down at least
-two seconds. Every pass retains inherited filtering, lifecycle, submission and results ownership.
+The wrapper can rerun the exact inherited main serially within those bounds. Every pass
+retains inherited filtering, lifecycle, submission and results ownership.
 
 A malformed tool request is rejected before dispatch. The optional bridge can classify
 that rejection through `Brain._invalid_tool_arguments`; preserve that hook when changing

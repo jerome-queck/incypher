@@ -382,6 +382,21 @@ class BrainTests(unittest.TestCase):
                 self.assertEqual(result["tool_calls"], 3)
                 self.assertEqual(len(shell.findings), expected_calls)
 
+    def test_malformed_checkpoint_findings_are_budgeted_and_quiet(self):
+        shell = FindingShell()
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "checkpoint_finding", "arguments": "{}",
+        }}]} for index in range(3)]
+        agent = ScriptedBrain(
+            replies, run_bash=shell, submit_flag=Mock(), max_steps=4, verbose=False
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertEqual(result["error"], "quiet stall: no new tool evidence")
+        self.assertEqual(result["tool_calls"], 3)
+        self.assertEqual(shell.findings, [])
+
     def test_reasoning_details_round_trip_unchanged_after_tool_call(self):
         details = [{"type": "reasoning.summary", "id": "synthetic", "data": "opaque"}]
         replies = [

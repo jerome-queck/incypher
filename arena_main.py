@@ -280,7 +280,10 @@ def _failure_class(result: Mapping, shell: _StatefulShell) -> AttemptOutcome:
         return AttemptOutcome.TIMEOUT
     if any(word in error for word in ("resource", "capacity", "output_limit", "queue_")):
         return AttemptOutcome.RESOURCE
-    if any(word in error for word in ("model request", "provider", "gateway", "budget")):
+    if any(
+        word in error
+        for word in ("model request", "malformed model", "provider", "gateway", "budget")
+    ):
         return AttemptOutcome.PROVIDER
     if "submission" in error or "verdict" in result:
         return AttemptOutcome.SUBMISSION
@@ -485,7 +488,12 @@ def main():
 
     def scoped_solve(client, ch, max_steps):
         cid = ch.get("id")
-        if type(cid) is not int or cid <= 0 or type(max_steps) is not int:
+        if (
+            type(cid) is not int
+            or cid <= 0
+            or type(max_steps) is not int
+            or not 1 <= max_steps <= _MAX_MODEL_CALLS
+        ):
             raise RuntimeError("Official solve arguments changed; inspect base contract")
         if not validation_selector and isinstance(client, _RankedClient) and client.trusted_solved(cid):
             coordinator.note_catalogue_solved(cid)
@@ -500,7 +508,7 @@ def main():
         assert allocated_steps is not None
         shell = _StatefulShell(state, admission, os.getcwd())
         started = time.perf_counter()
-        with trusted_attempt(ch):
+        with trusted_attempt(ch, deadline_monotonic=coordinator.deadline):
             solver_module.run_bash = shell
             try:
                 result = inherited_solve(client, ch, allocated_steps)

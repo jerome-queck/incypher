@@ -48,6 +48,7 @@ _FINDING_SECRET_VALUE = re.compile(
 )
 _FINDING_OPAQUE = re.compile(
     r"(?i)(?:\b[0-9a-f]{16,}\b|\beyJ[a-z0-9_-]{8,}(?:\.[a-z0-9_-]{8,}){1,2}\b|"
+    r"\b[a-z]{32,}\b|"
     r"\b(?=[a-z0-9_-]{24,}\b)(?=[a-z0-9_-]*[0-9_-])[a-z0-9_-]+\b|"
     r"\b[a-z0-9+/]{20,}={1,2})"
 )
@@ -236,11 +237,26 @@ def _initial_context(challenge: Mapping) -> AttemptContext:
 
 
 @contextmanager
-def trusted_attempt(challenge: Mapping) -> Iterator[AttemptContext]:
+def trusted_attempt(
+    challenge: Mapping, *, deadline_monotonic: float | None = None
+) -> Iterator[AttemptContext]:
     """Bind one context from trusted harness metadata and restore it afterward."""
     if _CURRENT.get() is not None:
         raise RuntimeError("nested trusted attempt context")
     context = _initial_context(challenge)
+    if deadline_monotonic is not None:
+        if (
+            isinstance(deadline_monotonic, bool)
+            or not isinstance(deadline_monotonic, (int, float))
+            or not math.isfinite(deadline_monotonic)
+        ):
+            raise ValueError("trusted outer deadline must be finite")
+        context = replace(
+            context,
+            deadline_monotonic=min(
+                context.deadline_monotonic, float(deadline_monotonic)
+            ),
+        )
     token = _CURRENT.set(context)
     try:
         yield context

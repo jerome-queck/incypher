@@ -526,6 +526,12 @@ class Brain:
                         or (argument_name is not None
                             and (not isinstance(arguments.get(argument_name), str)
                                  or not arguments[argument_name].strip()))):
+                    if name == "checkpoint_finding":
+                        if self.tool_calls >= self.max_tool_calls:
+                            return {"solved": False, "steps": steps,
+                                    "error": "tool call budget exhausted"}
+                        self.tool_calls += 1
+                        turn_quiet = True
                     self._invalid_tool_arguments(name)
                     messages.append({"role": "tool", "tool_call_id": tool_call.get("id"),
                                      "content": "Invalid tool arguments; supply a nonempty string field."})

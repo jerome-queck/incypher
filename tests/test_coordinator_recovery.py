@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import arena_main
 import brain
-from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
+from agent_ext.runtime_context import (
+    Finding,
+    FindingDisposition,
+    FindingKind,
+    current_attempt,
+)
 
 
 class _FakeManagedShell:
@@ -593,6 +598,39 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(attempted, [41])
 
+    def test_malformed_provider_message_stops_after_semantic_progress(self):
+        challenges = [
+            {"id": challenge_id, "name": f"malformed-{challenge_id}",
+             "category": "misc", "type": "standard", "value": 100, "files": []}
+            for challenge_id in (43, 44)
+        ]
+        attempted = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempted.append(ch["id"])
+            solver.run_bash("inspect malformed response")
+            return {
+                "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 1,
+                "error": "malformed model message",
+            }
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "malformed_provider_stop_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "malformed_provider_stop_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+                patch("arena_main.ManagedShell", _FakeManagedShell),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempted, [43])
+
     def test_crashed_slices_charge_model_calls_to_global_cap(self):
         challenges = [
             {"id": challenge_id, "name": f"crash-{challenge_id}",
@@ -713,6 +751,73 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 self.assertEqual(slices.admit(challenge_id, 1), (1, None))
         self.assertEqual(slices.total_slices, 60)
         self.assertEqual(slices.admit(16, 1), (None, "slice budget"))
+
+    def test_attempt_deadline_is_capped_by_outer_run(self):
+        challenge = {
+            "id": 62, "name": "deadline", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }
+        observed = []
+
+        def solve_challenge(client, ch, max_steps):
+            observed.append(current_attempt(required=True).deadline_monotonic)
+            return {
+                "solved": True, "steps": 1, "model_calls": 1, "tool_calls": 0,
+            }
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "outer_deadline_solver"
+        )
+        started = arena_main.time.monotonic()
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "outer_deadline_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ATTEMPT_TIMEOUT_SECONDS": "480",
+                }, clear=True),
+                patch("arena_main._MAX_RUN_SECONDS", 30),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(len(observed), 1)
+        self.assertGreater(observed[0], started)
+        self.assertLessEqual(observed[0], started + 30.1)
+
+    def test_wrapper_rejects_out_of_range_inherited_step_budget(self):
+        challenge = {
+            "id": 63, "name": "invalid budget", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }
+
+        for invalid in (0, 151):
+            with self.subTest(invalid=invalid):
+                def solve_challenge(client, ch, max_steps):
+                    self.fail("invalid inherited budget reached the solver")
+
+                module_name = f"invalid_budget_solver_{invalid}"
+                official, solver = self._harness(
+                    [challenge], solve_challenge, module_name
+                )
+
+                def invalid_main():
+                    client = official.CTFdClient("base", "token")
+                    official.solve_challenge(client, client.challenge(63), invalid)
+
+                official.main = invalid_main
+                with tempfile.TemporaryDirectory() as directory:
+                    with (
+                        patch.dict(sys.modules, {"main": official, module_name: solver}),
+                        patch.dict(os.environ, {
+                            "RUNTIME_STATE_PATH": os.path.join(
+                                directory, "runtime.sqlite3"
+                            ),
+                        }, clear=True),
+                    ):
+                        with self.assertRaisesRegex(RuntimeError, "arguments changed"):
+                            arena_main.main()
 
     def test_dynamic_lifecycles_cleanup_before_each_outer_pass(self):
         challenge = {

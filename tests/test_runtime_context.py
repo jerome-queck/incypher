@@ -102,6 +102,7 @@ class RuntimeContextTests(unittest.TestCase):
             "Service is at 192.0.2.10",
             "Try localhost:31337",
             "Recovered 0123456789abcdef0123456789abcdef",
+            "Recovered QWERTYUIOPASDFGHJKLZXCVBNMQWERTY",
             "Recovered sk-abcdefghijklmnop",
             "key=synthetic-value",
             "Reuse the connection endpoint",
@@ -113,6 +114,17 @@ class RuntimeContextTests(unittest.TestCase):
             with self.subTest(summary=summary[:40]):
                 with self.assertRaisesRegex(ValueError, "without sensitive data"):
                     Finding(FindingKind.OBSERVED, summary)
+
+    def test_outer_deadline_caps_attempt_deadline(self):
+        with patch("agent_ext.runtime_context.time.monotonic", return_value=100.0):
+            with trusted_attempt(self.challenge, deadline_monotonic=125.0) as context:
+                self.assertEqual(context.deadline_monotonic, 125.0)
+        for invalid in (True, "125", float("nan"), float("inf")):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                ValueError, "outer deadline"
+            ):
+                with trusted_attempt(self.challenge, deadline_monotonic=invalid):
+                    pass
 
     def test_connection_redaction_values_are_transient_and_repr_hidden(self):
         connection = "nc synthetic-box 31337"

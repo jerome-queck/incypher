@@ -34,11 +34,10 @@ PR3 additionally bounds arbitrary shell capture, reaps descendants, prevents sam
 exact-command replay, stops three quiet turns after one replan, limits one candidate per
 evidence turn, classifies tool/crash outcomes durably and skips trusted solved briefs
 outside explicit validation images.
-PR4 candidate adds strict typed safe findings and bounded serial same-run revisits: four
-slices per challenge, 60 slices, 150 model calls, six hours, two-second cooldown, and global
-stop on provider/submission uncertainty. Its first held-out image passed RSA but exhausted
+PR4 candidate adds strict typed safe findings and bounded serial same-run revisits governed
+by [strategy.md](strategy.md). Its first held-out image passed RSA but exhausted
 the baked 6/10-turn limits on network/reversing without submissions. The repaired candidate
-uses inherited runtime `MAX_STEPS` directly (1–150), exposes dollar/tool controls to the
+uses inherited runtime `MAX_STEPS` directly, exposes dollar/tool controls to the
 local CLI, tells the model its remaining slice budget, and adds bounded generic aligned
 known-plaintext network guidance. Reset-set practice remains parked until final review/merge.
 
