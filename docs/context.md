@@ -82,7 +82,7 @@ candidate continues through review/merge.
 - Hardened release runtime `a43e59b` retained 3/3 on fresh B19-B21: RSA 4/3,
   network 7/7 under 12/16, reversing 9/8, one correct/zero wrong submission each and
   zero unresolved spend. Total measured development spend through B21 is USD 0.06853611.
-- The uncommitted persistence/pacing candidate passes whitespace/compile checks and
+- Frozen candidate runtime `a575a32` passes whitespace/compile checks and
   347 portable tests with 25 expected platform skips. Clean AMD64 Day-2 image
   `sha256:6e878ec8341b2898f5514365a7d7d86baedfd689e43eb8dda5e73871894cc927`
   is 284,038,804 bytes and passes checker 6/0/2, all eight official guards, clean config,
