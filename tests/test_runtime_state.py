@@ -295,6 +295,55 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertEqual(typed.attempts, 0)
         self.assertTrue(typed.eligible)
 
+    def test_uncertain_submission_blocks_replay_until_later_catalogue_reconciliation(self):
+        brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
+        context = self.finding_context(self.static)
+        candidate = "INCYPHER{SUBMISSION_SENTINEL}"
+        self.store.rank_briefs([brief], now=10)
+        self.assertTrue(self.store.reserve_submission(context, candidate, now=10))
+        self.assertFalse(self.store.reserve_submission(context, candidate, now=11))
+        self.store.reconcile_submission(context, candidate, "uncertain", now=12)
+
+        self.store.rank_briefs([brief], now=13)
+        self.assertFalse(self.store.challenge_eligible(7))
+        self.store.reconcile_submission_catalogue([brief], now=311.999)
+        self.store.rank_briefs([brief], now=312)
+        self.assertFalse(self.store.challenge_eligible(7))
+        self.store.reconcile_submission_catalogue([brief], now=312)
+        self.store.rank_briefs([brief], now=312)
+        self.assertTrue(self.store.challenge_eligible(7))
+
+        self.store.checkpoint()
+        payload = b"".join(
+            path.read_bytes() for path in self.path.parent.glob("state.sqlite3*")
+        )
+        self.assertNotIn(b"SUBMISSION_SENTINEL", payload)
+
+    def test_definitive_submission_verdict_clears_intent_immediately(self):
+        brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
+        context = self.finding_context(self.static)
+        self.store.rank_briefs([brief], now=10)
+        self.assertTrue(self.store.reserve_submission(context, "INCYPHER{safe}", now=10))
+        self.store.reconcile_submission(context, "INCYPHER{safe}", "incorrect", now=11)
+        self.store.rank_briefs([brief], now=11)
+        self.assertTrue(self.store.challenge_eligible(7))
+
+    def test_submission_reservation_commit_failure_fails_before_dispatch(self):
+        def fail(operation):
+            if operation == "reserve_submission":
+                raise OSError("fault")
+
+        store = RuntimeState(self.path, before_commit=fail)
+        with self.assertRaisesRegex(RuntimeStateError, "was not committed"):
+            store.reserve_submission(
+                self.finding_context(self.static), "INCYPHER{never-dispatched}", now=10
+            )
+
+        restarted = RuntimeState(self.path)
+        brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
+        restarted.rank_briefs([brief], now=11)
+        self.assertTrue(restarted.submission_reconciled(7))
+
     def test_restart_and_concurrent_readers(self):
         self.store.record_observation(self.static, ObservationKind.TOOL, "durable")
         restarted = RuntimeState(self.path)

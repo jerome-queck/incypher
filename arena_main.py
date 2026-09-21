@@ -139,9 +139,10 @@ def _public_scoreboard_crowd_counts() -> dict[str, int]:
 class _CatalogueCache:
     """Bound trusted catalogue reads while allowing local reranking every slice."""
 
-    def __init__(self, clock=None, crowd_source=None):
+    def __init__(self, clock=None, crowd_source=None, on_refresh=None):
         self._clock = clock or time.monotonic
         self._crowd_source = crowd_source
+        self._on_refresh = on_refresh
         self._briefs: tuple[dict, ...] | None = None
         self._refresh_at = 0.0
 
@@ -162,6 +163,8 @@ class _CatalogueCache:
             ):
                 raise RuntimeError("Official challenge catalogue changed; inspect base contract")
             copied = [dict(item) for item in briefs]
+            if self._on_refresh is not None:
+                self._on_refresh(copied)
             if self._crowd_source is not None:
                 try:
                     crowd_counts = self._crowd_source()
@@ -230,6 +233,9 @@ class _RankedClient:
 
     def trusted_solved(self, challenge_id: int) -> bool:
         return int(challenge_id) in self._solved
+
+    def trusted_submission_reconciled(self, challenge_id: int) -> bool:
+        return self._state.submission_reconciled(int(challenge_id))
 
     def mark_solved(self, challenge_id: int) -> None:
         self._catalogue.mark_solved(challenge_id)
@@ -317,6 +323,16 @@ class _StatefulShell:
             self._state.record_challenge_progress(context.challenge_id)
             self._progress += 1
         return disposition
+
+    def reserve_submission(self, candidate: str) -> bool:
+        return self._state.reserve_submission(
+            current_attempt(required=True), candidate
+        )
+
+    def reconcile_submission(self, candidate: str, status: str) -> None:
+        self._state.reconcile_submission(
+            current_attempt(required=True), candidate, status
+        )
 
     def __call__(self, command: str) -> str:
         if self._duplicate(command):
@@ -465,11 +481,14 @@ class _OuterCoordinator:
         *,
         solved: bool,
         budget_exhausted: bool = False,
+        unresolved_dispatch: bool = False,
     ) -> None:
         if time.monotonic() >= self.deadline:
             self.stop_reason = "run deadline"
         if budget_exhausted:
             self.stop_reason = "model budget exhausted"
+        if unresolved_dispatch:
+            self.stop_reason = "unresolved model dispatch"
         if not solved:
             self.pass_all_solved = False
 
@@ -536,7 +555,10 @@ def main():
     validation_selector = os.path.isfile("/opt/agent/.validation-id")
     explicit_selector = validation_selector or bool(os.environ.get("ONLY_IDS", "").strip())
     coordinator = _OuterCoordinator()
-    catalogue = _CatalogueCache(crowd_source=_public_scoreboard_crowd_counts)
+    catalogue = _CatalogueCache(
+        crowd_source=_public_scoreboard_crowd_counts,
+        on_refresh=state.reconcile_submission_catalogue,
+    )
 
     def client_factory(base, token):
         return _RankedClient(inherited_client(base, token), state, catalogue)
@@ -563,6 +585,11 @@ def main():
             result = _solved_result(ch)
             state.record_challenge_outcome(int(cid), True, 0, AttemptOutcome.UNSOLVED)
             return result
+        if (
+            isinstance(client, _RankedClient)
+            and not client.trusted_submission_reconciled(cid)
+        ):
+            return _deferred_result(ch, "submission reconciliation")
         allocated_steps, deferred = coordinator.admit(max_steps)
         if deferred is not None:
             return _deferred_result(ch, deferred)
@@ -634,6 +661,9 @@ def main():
             solved=solved,
             budget_exhausted=(
                 str(result.get("error", "")).lower() == "model budget exhausted"
+            ),
+            unresolved_dispatch=(
+                str(result.get("error", "")) == "GatewayTimeout: model request failed"
             ),
         )
         return result

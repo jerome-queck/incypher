@@ -37,6 +37,9 @@ runtime requirements. [Event](https://www.imperial.ac.uk/about/global/singapore/
 Only supplied challenge systems are authorized. Platform, other teams and shared
 infrastructure are excluded. Keep flags and solutions private during the event.
 Human intervention during the scored run is penalized. [Technical rules](https://hackathon.in-cypher.com/how-to-play)
+The user has separately authorized passive reads of the competition's public status,
+scores and usage pages for release monitoring and queue hints. Those reads neither target
+the platform nor grant authority to call private APIs, other teams or challenge systems.
 
 Practice opened 14 Sep at 10:00; 21 Sep is development; competition challenges open
 22 Sep at 10:00. Practice solves do **not** count toward competition points.

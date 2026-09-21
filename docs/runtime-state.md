@@ -16,8 +16,8 @@ connections, credentials and candidate flags are not persisted.
   Ordering is unsolved, eligible, fewest attempts, crowd popularity, progress, lowest
   points, static/dynamic, age, then the unchanged numeric challenge ID. The adapter
   accepts only nonnegative exact-integer catalogue `solves` or `solve_count`; absent or
-  malformed values contribute zero. Each solve adds 20 ranking points, capped after five
-  solves (+100). Attempt rounds prevent monopolization; recent public solves and low points
+  malformed values contribute zero. Crowd count is a capped ordinal tie-break, not a
+  points bonus; counts above five are equivalent. Attempt rounds prevent monopolization; recent public solves and low points
   favor likely easy work within a round. This mutable hint does not enter material or
   evidence scope hashes. Failed slices receive finite 1s then 2s backoff. Production
   refresh/cache policy is authoritative in [strategy.md](strategy.md).
@@ -42,6 +42,11 @@ connections, credentials and candidate flags are not persisted.
 - `scope_key(ctx)` derives a key directly from trusted `AttemptContext` fields.
   `lookup`/`lookup_command`, `record`, and `project`/`project_memory` accept either that
   context or `Scope`.
+- `reserve_submission(ctx, candidate)` writes only a keyed candidate identity before the
+  trusted callback. `reconcile_submission` retains uncertain effects; while one exists,
+  that challenge is deferred but the rest of the queue continues. A later trusted
+  catalogue refresh clears an accepted solve immediately or an unchanged unsolved state
+  after five minutes. Candidate text is never stored.
 
 The database defaults to `/work/runtime-state.sqlite3`, uses WAL plus full synchronous
 commits, short transactions and bounded lock waits. `checkpoint()` requests a passive

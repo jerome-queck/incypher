@@ -82,17 +82,21 @@ fresh local ranking decision without overlapping dynamic lifecycles. The wrapper
 the inherited trusted catalogue at most every five minutes; intervening passes rerank a
 defensive cached copy, and accepted solves update only that cache until the next refresh.
 Temporary catalogue read failures retain the prior trusted snapshot for one full cadence;
-initial or malformed reads fail closed. At the same cadence, a bounded three-second public
+initial or malformed reads fail closed. Submission intent is durably keyed before callback
+dispatch. An uncertain callback defers only that challenge until a trusted catalogue refresh
+shows it solved or, after five minutes, still unsolved; no uncertain candidate is blindly
+replayed. At the same cadence, a bounded three-second public
 read of the official score page extracts only its recent-event JSON and overlays exact-name
 solve counts as a weak queue hint. Missing, malformed, oversized or unavailable public data
 contributes no hint and never blocks the trusted catalogue. It does not contact challenge
 targets. There is no separate cumulative
 slice or call-count cutoff: durable model-dollar admission and a 24-hour process safety
 bound govern the run. The separate 6.5-hour pacing window is a soft spend target toward
-the competition horizon, not the process lifetime or dollar ceiling. All-solved/empty,
-hard model-dollar exhaustion, or an inherited nonzero return is terminal. Per-attempt
-provider, submission, crash and malformed-response outcomes affect durable ranking and
-conservative cost reservations, but never kill the outer queue. The inherited main remains
+the competition horizon, not the process lifetime or dollar ceiling. A normal empty
+catalogue/queue polls again after 30 seconds; an explicit selector exits when empty. Hard
+model-dollar exhaustion, an inherited nonzero return, the process deadline, or an unresolved
+gateway transport worker is terminal. Other provider, submission, crash and malformed-response
+outcomes affect durable ranking without killing the outer queue. The inherited main remains
 the sole lifecycle, submission and results owner.
 
 ## Verification and integration gate

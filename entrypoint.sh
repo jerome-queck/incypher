@@ -2,6 +2,7 @@
 set -eu
 
 day1_llm_env_file=${DAY1_LLM_ENV_FILE:-/opt/agent/.day1-llm.env}
+unset LLM_MODEL_AUTO_DISCOVER
 
 # The organiser's complete runtime configuration always wins. A partial runtime
 # configuration is left untouched so the Brain reports it instead of mixing providers.

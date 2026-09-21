@@ -738,7 +738,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
 
         self.assertEqual(attempted, [51, 52, 51])
 
-    def test_raised_submission_callback_requeues_and_later_work_continues(self):
+    def test_raised_submission_callback_blocks_replay_while_later_work_continues(self):
         challenges = [
             {"id": challenge_id, "name": f"raised-submission-{challenge_id}",
              "category": "misc", "type": "standard", "value": 100, "files": []}
@@ -782,7 +782,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(attempted, [53, 54, 53])
+        self.assertEqual(attempted, [53, 54])
 
     def test_deadline_is_hard_but_slice_count_does_not_abandon_unsolved_work(self):
         self.assertEqual(arena_main._MAX_RUN_SECONDS, 86_400)

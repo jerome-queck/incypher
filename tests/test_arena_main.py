@@ -71,6 +71,20 @@ class ArenaSelectionTests(unittest.TestCase):
         self.assertEqual(cache.list_challenges(delegate)[0]["solves"], 2)
         self.assertEqual(delegate.calls, 2)
 
+    def test_catalogue_refresh_reconciles_before_ranking(self):
+        refreshed = []
+
+        class Delegate:
+            def list_challenges(self):
+                return [{"id": 1, "points": 100, "solved": False}]
+
+        cache = arena_main._CatalogueCache(
+            clock=lambda: 0,
+            on_refresh=lambda briefs: refreshed.append([dict(item) for item in briefs]),
+        )
+        cache.list_challenges(Delegate())
+        self.assertEqual(refreshed, [[{"id": 1, "points": 100, "solved": False}]])
+
     def test_refreshed_crowd_counts_reorder_the_next_ranked_catalogue(self):
         now = [0.0]
 
@@ -167,6 +181,12 @@ class ArenaSelectionTests(unittest.TestCase):
         self.assertEqual(coordinator.admit(4), (4, None))
         coordinator.note_result(solved=False, budget_exhausted=True)
         self.assertFalse(coordinator.should_continue())
+
+        coordinator = arena_main._OuterCoordinator()
+        self.assertEqual(coordinator.admit(4), (4, None))
+        coordinator.note_result(solved=False, unresolved_dispatch=True)
+        self.assertFalse(coordinator.should_continue())
+        self.assertEqual(coordinator.stop_reason, "unresolved model dispatch")
 
     def test_per_slice_budget_exhaustion_is_requeueable_not_provider_uncertainty(self):
         shell = SimpleNamespace(failure_outcome=None)

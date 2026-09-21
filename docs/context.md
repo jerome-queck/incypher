@@ -22,7 +22,7 @@ were merged. No open PR contained the requested general practice-selection chang
 | `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, Day-2 served-model discovery and durable conservative ledger; candidate requests high/medium reasoning only when discovered as supported and paces cumulative spend against a configurable window; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
-| `agent_ext/runtime_state.py` | Active bounded SQLite seam; PR4 typed-findings candidate under review | Restart-safe backoff, scoped command/finding dedupe and <=16 record/8 KiB projection; raw commands, output, flags and credentials are not stored |
+| `agent_ext/runtime_state.py` | Active bounded SQLite seam | Restart-safe backoff, scoped command/finding dedupe, keyed submission intent/reconciliation and <=16 record/8 KiB projection; raw commands, output, flags and credentials are not stored |
 | `memory.py`, `verification.py`, `submission_state.py`, `results.py` | Earlier offline helpers remain unconnected | PR3 uses the smaller runtime-state seam; inherited result mapping remains authoritative |
 | `scripts/arena.py` | Local setup/build/check/practice/push utility | Explicit API-backed practice; Day-1 secret handling; clean Day-2 build path |
 
@@ -39,18 +39,19 @@ PR4 adds strict typed safe findings and serial same-run revisits governed by
 [strategy.md](strategy.md). The release runtime passed fresh RSA/network/reversing at 3/3.
 The deployed runtime removes arbitrary cumulative slice/call abandonment, retains the
 per-slice inherited `MAX_STEPS` and dollar governor, and adds durable adaptive spend pacing.
-Newer local source adds bounded five-minute public crowd signals and Day-2 model discovery;
-it is checked locally but not pushed over the progressing live run.
+Newer local source adds bounded five-minute public crowd signals, fail-closed Day-2 model
+discovery, unresolved-dispatch shutdown and scoped submission reconciliation; it is checked
+locally but not pushed over the progressing live run.
 
 ## Evidence and release identity
 
 - Day-1 push #20, source `3a3452e`, remote digest
   `sha256:44065c5107ddcbc132932e32563b04c7d10bf60cb07116c2b4ec9e3b2fd0166e`,
-  began scoring at 03:10 SGT and remains `running`. By 03:19 it earned nine fresh
-  arena-origin solves / 1,650 VALID points, rank 2, penalty 0. This is fresh live proof of
+  began scoring at 03:10 SGT and remains `running`. By 03:39 it earned eleven fresh
+  arena-origin solves / 2,250 VALID points, rank 2, penalty 0. This is fresh live proof of
   persistent solving and queue rotation. The board now explicitly charges 100 points for
   every re-upload after the first scored run begins, so the working run is not replaced.
-- Local successor head `20285a7` passes 358 portable tests with 25 expected skips.
+- The local successor passes 365 portable tests with 25 expected skips.
   Clean AMD64 Day-2 image
   `sha256:be04f8f418c34197e23e5fef017e374f73ed1100f182ea816b16f5bb06ba3b1d`
   is 284,041,157 bytes, passes checker 6/0/2, contains no Day-1 secret/selector, and
@@ -173,8 +174,9 @@ The ordered technical gates below are current after PR3 merge and PR4 implementa
 
 1. **Freeze, review and merge the current candidate.** Require independent Standards and
    Spec pass, exact AMD64 structural/Linux checks, PR/CI and merged-tree rebuild.
-2. **Monitor queued Day-1 push #15.** Record origin transitions and scores separately from
-   registry/queue evidence. Do not manually solve live tasks or request an organiser rerun.
+2. **Monitor running Day-1 push #20.** Preserve it while it progresses because replacement
+   costs 100 points. Record origin transitions and scores separately from registry/queue
+   evidence. Do not manually solve live tasks or request an organiser rerun.
 3. **Measure before optimizing.** Compare identical practice tasks and budgets for baseline
    versus a change. Prioritize valid points per cost/time, coverage and recovery. Static
    parallelism is permitted but unimplemented; dynamic capacity is globally one.
@@ -184,8 +186,9 @@ The ordered technical gates below are current after PR3 merge and PR4 implementa
 
 Known limits: shell operations may overlap inside one model conversation, but challenge
 lifecycles and inherited passes remain serial, so dynamic capacity stays one. Durable typed
-findings are deliberately conservative and not yet measured on real CTF work. Provider and
-submission uncertainty remain terminal to avoid duplicate paid or submission effects.
+findings are deliberately conservative and not yet measured on real CTF work. An unresolved
+gateway worker stops the process to avoid overlapping paid effects; submission uncertainty
+defers only its challenge until trusted catalogue reconciliation while the queue continues.
 Day-2 request compatibility remains provider-dependent; dynamic cleanup remains inherited.
 
 ## Context management

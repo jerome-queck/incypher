@@ -21,7 +21,8 @@ when an injected transport ignores its timeout argument. Python cannot safely ca
 blocked thread or prove whether the remote provider charged/completed the request. Such
 a timeout is therefore explicitly unresolved: keep its budget reservation unsettled.
 The same gateway rejects another call while that worker remains alive. Process exit is
-the only hard cancellation boundary for a permanently blocked transport.
+the only hard cancellation boundary for a permanently blocked transport, so the arena
+coordinator stops that process instead of starting another challenge dispatch.
 
 Responses retain the assistant message, observed model, token counts and cost. Cost is
 classified as `measured`, `estimated` or `unknown`; missing or malformed usage is not
@@ -45,7 +46,8 @@ when measured. The durable ledger defaults to `/work/model-budget.sqlite3`, an U
 admission ceiling and USD 1 opaque-price reservations, leaving USD 15 of the competition
 allowance unadmitted for recovery/verification. The ceiling cannot exceed USD 85; opaque
 reservations must remain USD 0.05–5. Optional environment tuning is bounded;
-Day 2 requires the organiser's injected endpoint/key plus the image model policy.
+Day 2 requires the organiser's injected endpoint/key plus the authoritative
+[provider-discovery policy](provider-discovery.md).
 
 The ledger also stores its first-start wall time. Arena mode compares durable measured,
 estimated and unresolved spend, plus the next conservative reservation, with a linear

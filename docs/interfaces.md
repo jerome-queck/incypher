@@ -54,8 +54,9 @@ the harness's terminal success convention without proving this candidate was acc
 The normal loop has durable model-cost reservation/settlement and a separate bounded
 runtime-state database for challenge outcomes, finite ranking backoff, scoped command
 fingerprints and typed safe findings. Accepted model turns and new tool observations
-checkpoint scheduler progress before final/crash classification. It has no durable
-candidate reconciliation.
+checkpoint scheduler progress before final/crash classification. Before callback dispatch,
+the active shell durably stores only a keyed candidate identity. Uncertain effects block
+that challenge until trusted catalogue reconciliation; other challenges continue.
 
 ## Limits and change coordination
 

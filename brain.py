@@ -384,6 +384,16 @@ class Brain:
         self._checkpoint_finding = getattr(run_bash, "checkpoint_finding", None)
         if callable(self._checkpoint_finding):
             self._tools.append(FINDING_TOOL)
+        self._reserve_submission = (
+            getattr(run_bash, "reserve_submission", None)
+            if callable(getattr(type(run_bash), "reserve_submission", None))
+            else None
+        )
+        self._reconcile_submission = (
+            getattr(run_bash, "reconcile_submission", None)
+            if callable(getattr(type(run_bash), "reconcile_submission", None))
+            else None
+        )
         self.s = requests.Session()
         self.s.headers.update({
             "Content-Type": "application/json",
@@ -461,6 +471,8 @@ class Brain:
                 self._identity, self._discovery = discover_served_model(
                     configured_identity, fetch_json
                 )
+                if self._discovery.provenance != "compatible_catalogue":
+                    raise GatewayError("served model discovery unavailable")
             else:
                 self._identity = configured_identity
                 self._discovery = discover_provider(
@@ -547,6 +559,13 @@ class Brain:
             self._log("[step %d] submission budget exhausted" % step)
             return {"solved": False, "steps": step,
                     "error": "submission budget exhausted"}
+        if callable(self._reserve_submission) and not self._reserve_submission(flag):
+            return {
+                "solved": False,
+                "steps": step,
+                "verdict": {"status": "uncertain"},
+                "error": "submission unresolved: reconciliation required",
+            }
         self.submissions += 1
         try:
             verdict = self.submit_flag(flag)
@@ -557,6 +576,8 @@ class Brain:
             status = "uncertain"
         if status not in ("correct", "incorrect", "already_solved", "ratelimited", "error"):
             status = "uncertain"
+        if callable(self._reconcile_submission):
+            self._reconcile_submission(flag, status)
         self._log("[step %d] SUBMIT [flag redacted] -> %s" % (step, status))
         if status in ("correct", "already_solved"):
             return {"solved": True, "steps": step, "flag": flag, "verdict": verdict}

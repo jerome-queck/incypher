@@ -64,6 +64,17 @@ class EntrypointEnvironmentTests(unittest.TestCase):
             "https://runtime.example/v1|runtime-model|runtime-key|",
         )
 
+    def test_explicit_runtime_cannot_enable_image_default_substitution(self):
+        self.assertEqual(
+            self.run_entrypoint({
+                "LLM_BASE_URL": "https://runtime.example/v1",
+                "LLM_MODEL": "runtime-model",
+                "LLM_API_KEY": "runtime-key",
+                "LLM_MODEL_AUTO_DISCOVER": "1",
+            }),
+            "https://runtime.example/v1|runtime-model|runtime-key|",
+        )
+
     def test_day2_two_variable_runtime_gets_discoverable_image_default(self):
         self.assertEqual(
             self.run_entrypoint({

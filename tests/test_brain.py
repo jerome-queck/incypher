@@ -81,6 +81,23 @@ class FindingShell:
         return self.disposition
 
 
+class SubmissionShell:
+    def __init__(self):
+        self.reservations = []
+        self.reconciliations = []
+        self.admit = True
+
+    def __call__(self, command):
+        return "unused"
+
+    def reserve_submission(self, candidate):
+        self.reservations.append(candidate)
+        return self.admit
+
+    def reconcile_submission(self, candidate, status):
+        self.reconciliations.append((candidate, status))
+
+
 class BrainTests(unittest.TestCase):
     def test_prompt_clipping_preserves_scope_head_and_connection_tail(self):
         prompt = "HEAD-SCOPE\n" + ("x" * 30000) + "\nTAIL-CONNECTION"
@@ -280,6 +297,27 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(agent.s.gets[0][1]["Authorization"], "Bearer secret")
         self.assertEqual(agent.s.posts[0]["model"], "served/tool-model")
         self.assertEqual(agent.s.posts[0]["reasoning_effort"], "high")
+
+    def test_image_default_never_dispatches_an_unadvertised_model(self):
+        session = Mock()
+        session.get.return_value = Mock(
+            headers={"Content-Length": "11"},
+            raise_for_status=Mock(),
+            iter_content=Mock(return_value=iter([b'{"data":[]}'])),
+            close=Mock(),
+        )
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://organizer.example/v1",
+            "LLM_MODEL": "openai/gpt-5.6-luna",
+            "LLM_MODEL_AUTO_DISCOVER": "1",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = session
+            with self.assertRaisesRegex(brain.GatewayError, "discovery unavailable"):
+                agent._chat([{"role": "user", "content": "test"}])
+        session.post.assert_not_called()
 
     def test_observed_model_substitution_is_terminal_after_accounting(self):
         class Response:
@@ -976,6 +1014,28 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(result["verdict"], {"status": "uncertain"})
         self.assertEqual(result["error"], "submission unavailable: uncertain")
         self.assertEqual(submit.call_count, 1)
+
+    def test_uncertain_submission_is_reserved_and_replay_is_blocked(self):
+        candidate = "INCYPHER{uncertain-reservation}"
+        reply = {"content": candidate}
+        shell = SubmissionShell()
+        submit = Mock(side_effect=RuntimeError("delivery unknown"))
+
+        first = ScriptedBrain(
+            [reply], run_bash=shell, submit_flag=submit, verbose=False
+        ).solve("synthetic")
+        shell.admit = False
+        second = ScriptedBrain(
+            [reply], run_bash=shell, submit_flag=submit, verbose=False
+        ).solve("synthetic")
+
+        self.assertEqual(first["error"], "submission unavailable: uncertain")
+        self.assertEqual(
+            second["error"], "submission unresolved: reconciliation required"
+        )
+        self.assertEqual(submit.call_count, 1)
+        self.assertEqual(shell.reservations, [candidate, candidate])
+        self.assertEqual(shell.reconciliations, [(candidate, "uncertain")])
 
     def test_malformed_model_messages_return_failure_without_dispatch(self):
         for reply in ([], None, {"content": []}, {"tool_calls": {}},

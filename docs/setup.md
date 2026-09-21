@@ -139,8 +139,9 @@ Complete before the user-confirmed 22 Sep 10:00 SGT start:
    the bundled checker without a token. Confirm runtime `LLM_*` precedence and no
    Day-1 secret/validation file. When only endpoint/key are present, the entrypoint marks
    the image default for one bounded authenticated `/models` lookup: exact default wins,
-   otherwise the first advertised tool-capable model. Unavailable discovery retains the
-   image default. A structural pass does not validate the Day-2 endpoint or model.
+   otherwise selection follows [provider discovery](provider-discovery.md). Unavailable
+   discovery fails before dispatch. A structural pass does not validate the Day-2 endpoint
+   or model.
 4. Complete one authorized practice model/tool/submission test when credentials are
    available. Record source SHA, image/base digests, checks and sanitized result.
    Distinguish local and arena-origin evidence.
