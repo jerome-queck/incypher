@@ -791,7 +791,7 @@ class RuntimeState:
                     if challenge_id not in solved:
                         continue
                     stale_reconcilable = row["status"] in {
-                        "dispatch_possible", "uncertain", "already_solved", "unavailable",
+                        "dispatch_possible", "uncertain", "unavailable",
                     }
                     if solved[challenge_id] or (stale_reconcilable and (
                         instant - float(row["updated_at"])

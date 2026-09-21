@@ -437,8 +437,13 @@ class RuntimeStateTests(unittest.TestCase):
             "blocked",
         )
         self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": False}],
+            now=10_000,
+        )
+        self.assertFalse(self.store.submission_reconciled(replacement))
+        self.store.reconcile_submission_catalogue(
             [{"id": 7, "points": 100, "type": "standard", "solved": True}],
-            now=14,
+            now=10_001,
         )
         self.assertTrue(self.store.submission_reconciled(replacement))
 
