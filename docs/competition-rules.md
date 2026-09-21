@@ -37,6 +37,9 @@ runtime requirements. [Event](https://www.imperial.ac.uk/about/global/singapore/
 Only supplied challenge systems are authorized. Platform, other teams and shared
 infrastructure are excluded. Keep flags and solutions private during the event.
 Human intervention during the scored run is penalized. [Technical rules](https://hackathon.in-cypher.com/how-to-play)
+The user has separately authorized passive reads of the competition's public status,
+scores and usage pages for release monitoring and queue hints. Those reads neither target
+the platform nor grant authority to call private APIs, other teams or challenge systems.
 
 Practice opened 14 Sep at 10:00; 21 Sep is development; competition challenges open
 22 Sep at 10:00. Practice solves do **not** count toward competition points.
@@ -76,9 +79,9 @@ The technical submission requirements below are from
 | Writable/results | `/work`, `/tmp`; checkpoint `/work/results.json` |
 | Platform | Fresh per-run token; `CTF_BASE`/`CTFD_URL`, `CTF_TOKEN`/`CTFD_TOKEN` aliases |
 | Day 1 | Own LLM configuration; no injected model variables |
-| Day 2 | Read all three organiser-injected `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`; compatible Chat Completions endpoint |
+| Day 2 | Read organiser-injected `LLM_BASE_URL` and `LLM_API_KEY`; the image supplies/selects `LLM_MODEL` for the compatible endpoint |
 | Testing | Bundled `check_agent.sh`; structural pass does not establish solving |
-| Cost | Day-1 uploads free; Day-2 re-upload after first scored run costs 100 points |
+| Cost | Every re-upload after the first scored run begins costs 100 points; the live board applies this during Day 1 too |
 
 The latest image waits while a prior run is active. `done` means results collected;
 `running` means container alive; `collecting` means exited awaiting collection.
@@ -103,7 +106,7 @@ A shell tool alone does not establish that PoW has been handled.
 | Topic | Conflicting evidence | Working decision |
 | --- | --- | --- |
 | Finish | User + PDF: 22 Sep 16:30. Platform: 23 Sep 18:00. Imperial agenda also lists inconsistent 10:30–15:30/15:30–16:30 blocks | User-confirmed 22 Sep 10:00–16:30 governs preparation; retain conflict for later audits |
-| Model | PDF p. 21 + Imperial: any model. Usage: same organiser-chosen model on Day 2 | Honor injected Day-2 configuration; Sol/Astra docs guide development, not model selection in arena |
+| Model | PDF p. 21 + Imperial: any model. Current usage injects endpoint/key but leaves model selection to the image | Honor injected Day-2 endpoint/key; choose only a model advertised by that endpoint |
 | Cadence | Usage: 30 minutes. Live submit/status/scores: 5 minutes, up to two cycles/~10 minutes to collect | Use current live timestamps for observation; never assume immediate rerun |
 | Duration | Usage: no container wall timer. PDF: fixed event finish and token exhaustion | Runtime may persist; scoring still has an event deadline. No evidence points after finish count |
 | Restart/re-upload | PDF penalizes organiser restart; usage penalizes re-upload | Avoid both during scoring; combined/double-charge semantics unknown |

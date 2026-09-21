@@ -74,8 +74,35 @@ preserves uncertainty. Cleanup failure does not erase a definitive outcome.
 
 Deadlines are cooperative around synchronous callbacks; a 30-second budget cannot
 force-stop a 180-second HTTP request. Production hard limits need cancellable/bounded
-callbacks and a tested cleanup path. Broad multi-challenge ranking needs an authorized
-selection seam, not a second uncontrolled loop around inherited main.
+callbacks and a tested cleanup path. The active wrapper uses the exact guarded inherited
+main as its authorized selection seam. Each inherited pass admits one strictly bounded
+`MAX_STEPS` slice, defers every other unstarted challenge, then returns all still-unsolved
+work to the serial queue after a two-second cooldown. This gives each completed slice a
+fresh local ranking decision without overlapping dynamic lifecycles. The wrapper refreshes
+the inherited trusted catalogue at most every five minutes; intervening passes rerank a
+defensive cached copy, and accepted solves update only that cache until the next refresh.
+Temporary catalogue read failures retain the prior trusted snapshot for one full cadence;
+initial or malformed reads fail closed. Submission intent is durably keyed to exact
+material/instance scope, then marked dispatch-possible immediately before callback dispatch.
+An uncertain callback defers only that scope until a trusted catalogue refresh
+shows it solved or, after five minutes, still unsolved; no uncertain candidate is blindly
+replayed. Attributable accepted/rejected outcomes remain durable and idempotent across
+the outer outcome checkpoint; accepted, independently persisted account-level
+already-solved and conflicting outcomes block every replacement scope until the catalogue
+confirms it solved. Contradictory definitive replay becomes conflict. At the
+same cadence, a bounded three-second public
+read of the official score page extracts only its recent-event JSON and overlays exact-name
+solve counts as a weak queue hint. Missing, malformed, oversized or unavailable public data
+contributes no hint and never blocks the trusted catalogue. It does not contact challenge
+targets. There is no separate cumulative
+slice or call-count cutoff: durable model-dollar admission and a 24-hour process safety
+bound govern the run. The separate 6.5-hour pacing window is a soft spend target toward
+the competition horizon, not the process lifetime or dollar ceiling. A normal empty
+catalogue/queue polls again after 30 seconds; an explicit selector exits when empty. Hard
+model-dollar exhaustion, an inherited nonzero return, the process deadline, or an unresolved
+gateway transport worker is terminal. Other provider, submission, crash and malformed-response
+outcomes affect durable ranking without killing the outer queue. The inherited main remains
+the sole lifecycle, submission and results owner.
 
 ## Verification and integration gate
 

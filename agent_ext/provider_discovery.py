@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from .model_gateway import ProviderCapabilities, ProviderIdentity
 
@@ -255,6 +255,96 @@ def discover_provider(
     if cache is not None and result.provenance != "unknown":
         cache.put(identity.model, result)
     return result
+
+
+def _compatible_models_url(endpoint: str) -> str | None:
+    try:
+        parsed = urlsplit(endpoint)
+    except ValueError:
+        return None
+    suffix = "/chat/completions"
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.endswith(suffix)
+    ):
+        return None
+    path = parsed.path[:-len(suffix)] + "/models"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def discover_served_model(
+    identity: ProviderIdentity,
+    fetch_json: FetchJSON,
+) -> tuple[ProviderIdentity, DiscoveryResult]:
+    """Resolve an image default against one authenticated compatible catalogue.
+
+    Exact configured identity wins when advertised. Otherwise the provider's first
+    explicitly tool-capable model wins; catalogues without capability metadata use
+    their first model. Any unavailable or malformed input preserves the image default.
+    """
+    if not isinstance(identity, ProviderIdentity):
+        raise ValueError("ProviderIdentity required")
+    if not callable(fetch_json):
+        raise ValueError("fetch_json must be callable")
+    models_url = _compatible_models_url(identity.endpoint)
+    if models_url is None:
+        return identity, _OPAQUE
+    try:
+        raw = fetch_json(models_url, _FETCH_TIMEOUT_SECONDS, _MAX_CATALOGUE_BYTES)
+    except Exception:
+        return identity, _OPAQUE
+    document = _parse_document(raw)
+    data = document.get("data") if document is not None else None
+    if not isinstance(data, list) or not data or len(data) > _MAX_MODELS:
+        return identity, _OPAQUE
+    entries: list[Mapping[str, Any]] = []
+    for item in data:
+        if not isinstance(item, Mapping):
+            return identity, _OPAQUE
+        model_id = item.get("id")
+        if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_TEXT:
+            return identity, _OPAQUE
+        entries.append(item)
+    selected = next(
+        (item for item in entries if item.get("id") == identity.model), None
+    )
+    if selected is None:
+        tool_capable = []
+        unspecified = []
+        for item in entries:
+            parameters = item.get("supported_parameters")
+            if parameters is None:
+                unspecified.append(item)
+            elif (
+                isinstance(parameters, list)
+                and len(parameters) <= _MAX_PARAMETERS
+                and all(isinstance(value, str) and len(value) <= _MAX_TEXT
+                        for value in parameters)
+                and "tools" in parameters
+            ):
+                tool_capable.append(item)
+        candidates = tool_capable or unspecified
+        if not candidates:
+            return identity, _OPAQUE
+        selected = candidates[0]
+    model = selected["id"]
+    canonical = selected.get("canonical_slug")
+    if not isinstance(canonical, str) or not canonical or len(canonical) > _MAX_TEXT:
+        canonical = None
+    resolved = ProviderIdentity(identity.endpoint, identity.api_key, model)
+    result = DiscoveryResult(
+        _parse_capabilities(selected),
+        None,
+        "compatible_catalogue",
+        "compatible_catalogue",
+        canonical,
+    )
+    return resolved, result
 
 
 def estimate_max_cost(

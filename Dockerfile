@@ -6,6 +6,13 @@ COPY entrypoint.sh /opt/agent/entrypoint.sh
 COPY validation_main.py /opt/agent/validation_main.py
 COPY arena_main.py /opt/agent/arena_main.py
 
+# Keep each challenge slice bounded so the persistent queue reaches all work.
+# The arena may still override these ordinary runtime controls.
+ENV MAX_STEPS=12 \
+    MAX_TOOL_CALLS=12 \
+    MAX_SUBMISSIONS=3 \
+    ARENA_DEFAULT_LLM_MODEL=openai/gpt-5.6-luna
+
 ARG INCLUDE_DAY1_LLM=0
 RUN --mount=type=secret,id=day1_llm \
     if [ "$INCLUDE_DAY1_LLM" = "1" ]; then \

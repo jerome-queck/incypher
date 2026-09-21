@@ -1,8 +1,8 @@
 # Sol and Astra: agent-facing instructions
 
 Verified 21 Sep 2026 against official OpenAI pages. Applies to Codex agents developing
-this repository. It does **not** prescribe the arena model: Day 2 injects its own model
-and compatible endpoint. These notes guide document/prompt authors; root instructions
+this repository. It does **not** prescribe the arena model: Day 2 injects endpoint/key and
+the image selects a compatible served model. These notes guide document/prompt authors;
 remain short and branch-specific references carry details.
 
 ## GPT-5.6 Sol

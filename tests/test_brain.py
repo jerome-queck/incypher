@@ -7,12 +7,14 @@ import threading
 import time
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import brain
 import agent_ext.runtime_context as runtime_context
 from agent_ext.provider_discovery import DiscoveryResult
 from agent_ext.runtime_context import trusted_attempt
+from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
 
 class ScriptedBrain(brain.Brain):
@@ -66,6 +68,45 @@ class SupervisedShell:
         self.closed = True
 
 
+class FindingShell:
+    def __init__(self, disposition=FindingDisposition.SAVED):
+        self.disposition = disposition
+        self.findings = []
+
+    def __call__(self, command):
+        return "unused"
+
+    def checkpoint_finding(self, finding):
+        self.findings.append(finding)
+        return self.disposition
+
+
+class SubmissionShell:
+    def __init__(self):
+        self.reservations = []
+        self.reconciliations = []
+        self.dispatch_marks = []
+        self.admit = True
+        self.reconciled = True
+
+    def __call__(self, command):
+        return "unused"
+
+    def reserve_submission(self, candidate):
+        self.reservations.append(candidate)
+        return "reserved" if self.admit else "blocked"
+
+    def submission_reconciled(self):
+        return self.reconciled
+
+    def mark_submission_dispatch_possible(self, candidate):
+        self.dispatch_marks.append(candidate)
+        return self.admit
+
+    def reconcile_submission(self, candidate, status):
+        self.reconciliations.append((candidate, status))
+
+
 class BrainTests(unittest.TestCase):
     def test_prompt_clipping_preserves_scope_head_and_connection_tail(self):
         prompt = "HEAD-SCOPE\n" + ("x" * 30000) + "\nTAIL-CONNECTION"
@@ -75,14 +116,38 @@ class BrainTests(unittest.TestCase):
         self.assertIn("TAIL-CONNECTION", clipped)
         self.assertIn("[middle truncated]", clipped)
 
-    def test_trusted_points_bound_model_steps(self):
-        challenge = {
-            "id": 1, "name": "small", "category": "crypto", "type": "standard",
-            "points": 100, "files": [],
-        }
-        with trusted_attempt(challenge):
-            agent = brain.Brain(Mock(), Mock(), max_steps=40, verbose=False)
-        self.assertEqual(agent.max_steps, 4)
+    def test_trusted_points_do_not_override_runtime_step_budget(self):
+        for points in (100, 250, 500):
+            challenge = {
+                "id": points, "name": "step budget", "category": "crypto",
+                "type": "standard", "points": points, "files": [],
+            }
+            with trusted_attempt(challenge):
+                agent = brain.Brain(Mock(), Mock(), max_steps=17, verbose=False)
+            self.assertEqual(agent.max_steps, 17)
+
+    def test_step_budget_is_strictly_bounded(self):
+        for invalid in (True, "40", 0, -1, 151):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "max_steps"):
+                brain.Brain(Mock(), Mock(), max_steps=invalid, verbose=False)
+        self.assertEqual(brain.Brain(Mock(), Mock(), max_steps=150, verbose=False).max_steps, 150)
+
+    def test_each_model_turn_sees_remaining_budget_and_final_turn_instruction(self):
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": f"inspect-{index}"}),
+        }}]} for index in range(1, 4)]
+        agent = CapturingBrain(
+            replies, run_bash=Mock(return_value="new evidence"), submit_flag=Mock(),
+            max_steps=3, verbose=False,
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertEqual(result["final"], "step budget exhausted")
+        self.assertIn("model turn 1/3", agent.requests[0][-1]["content"])
+        self.assertIn("model turn 3/3", agent.requests[2][-1]["content"])
+        self.assertIn("Final model turn", agent.requests[2][-1]["content"])
+        self.assertIn("10 shell/checkpoint calls remain", agent.requests[2][-1]["content"])
 
     def test_production_chat_discovers_high_reasoning_and_settles_budget(self):
         class Response:
@@ -103,7 +168,7 @@ class BrainTests(unittest.TestCase):
             def __init__(self):
                 self.posts = []
 
-            def get(self, url, timeout, stream):
+            def get(self, url, timeout, stream, headers=None):
                 return Response({"data": [{
                     "id": "openai/test-model",
                     "canonical_slug": "openai/test-model-20260901",
@@ -144,6 +209,125 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(snapshot.measured_cost, brain.Decimal("0.01"))
         self.assertEqual(snapshot.unresolved_cost, brain.Decimal(0))
 
+    def test_opaque_provider_does_not_receive_inferred_reasoning(self):
+        class Response:
+            def __init__(self, payload):
+                self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.posts = []
+
+            def post(self, endpoint, headers, data, timeout, stream):
+                self.posts.append(json.loads(data))
+                return Response({
+                    "model": "injected/model",
+                    "choices": [{"message": {"role": "assistant", "content": "done"}}],
+                    "usage": {"cost": "0.01"},
+                })
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://opaque.invalid/v1",
+            "LLM_MODEL": "injected/model",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            "MODEL_SPEND_PACING": "adaptive",
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = Session()
+            agent._chat([{"role": "user", "content": "test"}])
+
+        request = agent.s.posts[0]
+        self.assertNotIn("reasoning", request)
+        self.assertNotIn("reasoning_effort", request)
+        self.assertEqual(request["max_tokens"], 4096)
+
+    def test_image_default_discovers_served_tool_model_and_capabilities(self):
+        class Response:
+            def __init__(self, payload):
+                self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.posts = []
+                self.gets = []
+
+            def get(self, url, timeout, stream, headers=None):
+                self.gets.append((url, dict(headers or {})))
+                return Response({"data": [
+                    {"id": "text-only", "supported_parameters": ["temperature"]},
+                    {"id": "served/tool-model", "supported_parameters": [
+                        "tools", "tool_choice", "reasoning_effort",
+                        "max_completion_tokens",
+                    ]},
+                ]})
+
+            def post(self, endpoint, headers, data, timeout, stream):
+                self.posts.append(json.loads(data))
+                return Response({
+                    "model": "served/tool-model",
+                    "choices": [{"message": {"role": "assistant", "content": "done"}}],
+                    "usage": {"cost": "0.01"},
+                })
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://organizer.example/v1",
+            "LLM_MODEL": "openai/gpt-5.6-luna",
+            "LLM_MODEL_AUTO_DISCOVER": "1",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = Session()
+            message = agent._chat([{"role": "user", "content": "test"}])
+
+        self.assertEqual(message["content"], "done")
+        self.assertEqual(agent.s.gets[0][0], "https://organizer.example/v1/models")
+        self.assertEqual(agent.s.gets[0][1]["Authorization"], "Bearer secret")
+        self.assertEqual(agent.s.posts[0]["model"], "served/tool-model")
+        self.assertEqual(agent.s.posts[0]["reasoning_effort"], "high")
+
+    def test_image_default_never_dispatches_an_unadvertised_model(self):
+        session = Mock()
+        session.get.return_value = Mock(
+            headers={"Content-Length": "11"},
+            raise_for_status=Mock(),
+            iter_content=Mock(return_value=iter([b'{"data":[]}'])),
+            close=Mock(),
+        )
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://organizer.example/v1",
+            "LLM_MODEL": "openai/gpt-5.6-luna",
+            "LLM_MODEL_AUTO_DISCOVER": "1",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = session
+            with self.assertRaisesRegex(brain.GatewayError, "discovery unavailable"):
+                agent._chat([{"role": "user", "content": "test"}])
+        session.post.assert_not_called()
+
     def test_observed_model_substitution_is_terminal_after_accounting(self):
         class Response:
             def __init__(self, payload):
@@ -160,7 +344,7 @@ class BrainTests(unittest.TestCase):
                 return None
 
         class Session:
-            def get(self, url, timeout, stream):
+            def get(self, url, timeout, stream, headers=None):
                 return Response({"data": []})
 
             def post(self, endpoint, headers, data, timeout, stream):
@@ -193,6 +377,13 @@ class BrainTests(unittest.TestCase):
         self.assertFalse(brain._observed_identity_matches(
             "openai/model", "openai/model-20260902", discovery
         ))
+        compatible = DiscoveryResult(
+            brain.ProviderCapabilities(), None, "compatible_catalogue",
+            "compatible_catalogue", "served/model-20260901",
+        )
+        self.assertTrue(brain._observed_identity_matches(
+            "served/model", "served/model-20260901", compatible
+        ))
         opaque = DiscoveryResult(
             brain.ProviderCapabilities(), None, "opaque", "unknown", None
         )
@@ -204,6 +395,69 @@ class BrainTests(unittest.TestCase):
         with patch.dict(os.environ, {"MODEL_BUDGET_USD": "85.01"}, clear=True):
             with self.assertRaisesRegex(ValueError, "outside"):
                 brain._budget_policy()
+
+    def test_budget_pacing_defaults_fixed_high_and_adapts_to_projected_spend(self):
+        snapshot = SimpleNamespace(
+            limit=brain.Decimal("85"),
+            committed_cost=brain.Decimal("80"),
+            started_at=1_000.0,
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            fixed = brain._budget_pace(snapshot, now=4_900.0)
+        self.assertEqual((fixed.posture, fixed.reasoning_effort, fixed.max_tokens), (
+            "fixed-high", "high", 4096,
+        ))
+
+        environment = {
+            "MODEL_SPEND_PACING": "adaptive",
+            "MODEL_BUDGET_WINDOW_SECONDS": "23400",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            behind = brain._budget_pace(
+                SimpleNamespace(**{**snapshot.__dict__, "committed_cost": brain.Decimal("1")}),
+                projected_cost=brain.Decimal("1"),
+                now=4_900.0,
+            )
+            on_target = brain._budget_pace(
+                SimpleNamespace(**{
+                    **snapshot.__dict__, "committed_cost": brain.Decimal("13"),
+                }),
+                projected_cost=brain.Decimal("1"),
+                now=4_900.0,
+            )
+            ahead = brain._budget_pace(
+                SimpleNamespace(**{
+                    **snapshot.__dict__, "committed_cost": brain.Decimal("20"),
+                }),
+                projected_cost=brain.Decimal("1"),
+                now=4_900.0,
+            )
+        self.assertEqual((behind.posture, behind.reasoning_effort), (
+            "behind-target", "high",
+        ))
+        self.assertEqual((on_target.posture, on_target.reasoning_effort), (
+            "on-target", "high",
+        ))
+        self.assertEqual((ahead.posture, ahead.reasoning_effort), (
+            "ahead-of-target", "medium",
+        ))
+        self.assertEqual({behind.max_tokens, on_target.max_tokens, ahead.max_tokens}, {4096})
+        self.assertEqual(on_target.observed_per_minute, brain.Decimal("0.2"))
+
+    def test_budget_pacing_validates_clock_window_and_projected_cost(self):
+        snapshot = SimpleNamespace(
+            limit=brain.Decimal("1"),
+            committed_cost=brain.Decimal(0),
+            started_at=1.0,
+        )
+        with patch.dict(os.environ, {"MODEL_BUDGET_WINDOW_SECONDS": "59"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "allowed range"):
+                brain._budget_pace(snapshot, now=2.0)
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "time must be finite"):
+                brain._budget_pace(snapshot, now=float("nan"))
+            with self.assertRaisesRegex(ValueError, "projected model cost"):
+                brain._budget_pace(snapshot, projected_cost=brain.Decimal("NaN"), now=2.0)
         with patch.dict(os.environ, {"MODEL_CALL_RESERVE_USD": "0.0001"}, clear=True):
             with self.assertRaisesRegex(ValueError, "outside"):
                 brain._budget_policy()
@@ -295,6 +549,70 @@ class BrainTests(unittest.TestCase):
             "run_bash", "submit_flag", "start_bash", "poll_bash", "cancel_bash",
         })
 
+    def test_checkpoint_finding_is_capability_gated_typed_and_budgeted(self):
+        shell = FindingShell()
+        summary = "The verifier decodes fixed-size blocks before comparison."
+        replies = [
+            {"content": "", "tool_calls": [{"id": "finding", "function": {
+                "name": "checkpoint_finding",
+                "arguments": json.dumps({"kind": "observed", "summary": summary}),
+            }}]},
+            {"content": "done"},
+        ]
+        agent = CapturingBrain(
+            replies, run_bash=shell, submit_flag=Mock(), verbose=False
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["tool_calls"], 1)
+        self.assertEqual(shell.findings, [Finding(FindingKind.OBSERVED, summary)])
+        self.assertIn(
+            "checkpoint_finding",
+            {tool["function"]["name"] for tool in agent._tools},
+        )
+        self.assertIn(
+            "Finding saved for this exact scope.",
+            [message.get("content") for message in agent.requests[1]],
+        )
+
+    def test_rejected_or_duplicate_findings_are_quiet(self):
+        for disposition, summary, expected_calls in (
+            (FindingDisposition.REJECTED, "Recovered token synthetic-value", 0),
+            (FindingDisposition.DUPLICATE, "The decoder reverses input blocks.", 3),
+        ):
+            with self.subTest(disposition=disposition):
+                shell = FindingShell(disposition)
+                replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+                    "name": "checkpoint_finding",
+                    "arguments": json.dumps({"kind": "hypothesis", "summary": summary}),
+                }}]} for index in range(3)]
+                agent = ScriptedBrain(
+                    replies, run_bash=shell, submit_flag=Mock(), max_steps=4, verbose=False
+                )
+
+                result = agent.solve("synthetic")
+
+                self.assertEqual(result["error"], "quiet stall: no new tool evidence")
+                self.assertEqual(result["tool_calls"], 3)
+                self.assertEqual(len(shell.findings), expected_calls)
+
+    def test_malformed_checkpoint_findings_are_budgeted_and_quiet(self):
+        shell = FindingShell()
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "checkpoint_finding", "arguments": "{}",
+        }}]} for index in range(3)]
+        agent = ScriptedBrain(
+            replies, run_bash=shell, submit_flag=Mock(), max_steps=4, verbose=False
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertEqual(result["error"], "quiet stall: no new tool evidence")
+        self.assertEqual(result["tool_calls"], 3)
+        self.assertEqual(shell.findings, [])
+
     def test_reasoning_details_round_trip_unchanged_after_tool_call(self):
         details = [{"type": "reasoning.summary", "id": "synthetic", "data": "opaque"}]
         replies = [
@@ -311,7 +629,10 @@ class BrainTests(unittest.TestCase):
 
         agent.solve("synthetic challenge")
 
-        assistant_turn = agent.requests[1][-2]
+        assistant_turn = next(
+            message for message in agent.requests[1]
+            if message.get("role") == "assistant" and "reasoning_details" in message
+        )
         self.assertEqual(assistant_turn["reasoning_details"], details)
         self.assertEqual(assistant_turn["tool_calls"], replies[0]["tool_calls"])
 
@@ -367,7 +688,7 @@ class BrainTests(unittest.TestCase):
         submitted = []
         replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
             "name": "submit_flag",
-            "arguments": json.dumps({"flag": "candidate-%d" % index})}}]}
+            "arguments": json.dumps({"flag": "INCYPHER{candidate-%d}" % index})}}]}
                    for index in range(1, 5)]
         agent = ScriptedBrain(
             replies,
@@ -645,6 +966,18 @@ class BrainTests(unittest.TestCase):
                     command.assert_not_called()
                     submit.assert_not_called()
 
+    def test_submit_tool_rejects_noncompetition_candidate_format(self):
+        submit = Mock()
+        agent = ScriptedBrain([
+            {"tool_calls": [{"id": "bad", "function": {
+                "name": "submit_flag", "arguments": json.dumps({"flag": "swordfish"}),
+            }}]},
+            {"content": "No supported result."},
+        ], run_bash=Mock(), submit_flag=submit, verbose=False)
+        result = agent.solve("sample")
+        self.assertFalse(result["solved"])
+        submit.assert_not_called()
+
     def test_duplicate_tool_candidate_does_not_spend_submission_budget(self):
         candidate = "INCYPHER" + "{duplicate-test}"
         reply = {"tool_calls": [{"id": "submit", "function": {
@@ -675,6 +1008,89 @@ class BrainTests(unittest.TestCase):
                 self.assertFalse(result["solved"])
                 self.assertEqual(result["error"], "submission unavailable: uncertain")
                 submit.assert_called_once_with("INCYPHER{synthetic-one}")
+
+    def test_submission_callback_exception_becomes_terminal_uncertainty(self):
+        replies = [{"content": "", "tool_calls": [{"id": "submit", "function": {
+            "name": "submit_flag",
+            "arguments": json.dumps({"flag": "INCYPHER{synthetic}"}),
+        }}]}]
+        submit = Mock(side_effect=RuntimeError("transport failed after possible delivery"))
+        result = ScriptedBrain(
+            replies, run_bash=Mock(), submit_flag=submit, verbose=False
+        ).solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["verdict"], {"status": "uncertain"})
+        self.assertEqual(result["error"], "submission unavailable: uncertain")
+        self.assertEqual(submit.call_count, 1)
+
+    def test_uncertain_submission_is_reserved_and_replay_is_blocked(self):
+        candidate = "INCYPHER{uncertain-reservation}"
+        reply = {"content": candidate}
+        shell = SubmissionShell()
+        submit = Mock(side_effect=RuntimeError("delivery unknown"))
+
+        first = ScriptedBrain(
+            [reply], run_bash=shell, submit_flag=submit, verbose=False
+        ).solve("synthetic")
+        shell.reconciled = False
+        second = ScriptedBrain(
+            [reply], run_bash=shell, submit_flag=submit, verbose=False
+        ).solve("synthetic")
+
+        self.assertEqual(first["error"], "submission unavailable: uncertain")
+        self.assertEqual(
+            second["error"], "submission unresolved: reconciliation required"
+        )
+        self.assertEqual(submit.call_count, 1)
+        self.assertEqual(shell.reservations, [candidate])
+        self.assertEqual(shell.dispatch_marks, [candidate])
+        self.assertEqual(shell.reconciliations, [(candidate, "uncertain")])
+
+    def test_dispatch_marker_failure_prevents_callback(self):
+        class FailingMarkerShell(SubmissionShell):
+            def mark_submission_dispatch_possible(self, candidate):
+                raise RuntimeError("marker commit failed")
+
+        candidate = "INCYPHER{not-dispatched}"
+        submit = Mock()
+        with self.assertRaisesRegex(RuntimeError, "marker commit failed"):
+            ScriptedBrain(
+                [{"content": candidate}],
+                run_bash=FailingMarkerShell(),
+                submit_flag=submit,
+                verbose=False,
+            ).solve("synthetic")
+        submit.assert_not_called()
+
+    def test_partial_submission_state_callbacks_are_rejected(self):
+        class PartialShell:
+            def __call__(self, command):
+                return "unused"
+
+            def reserve_submission(self, candidate):
+                return "reserved"
+
+        with self.assertRaisesRegex(ValueError, "supplied together"):
+            brain.Brain(PartialShell(), Mock(), verbose=False)
+
+    def test_durable_rejected_candidate_is_not_dispatched(self):
+        class RejectedShell(SubmissionShell):
+            def reserve_submission(self, candidate):
+                self.reservations.append(candidate)
+                return "rejected"
+
+        candidate = "INCYPHER{durably-wrong}"
+        submit = Mock()
+        result = ScriptedBrain(
+            [{"content": candidate}],
+            run_bash=RejectedShell(),
+            submit_flag=submit,
+            verbose=False,
+        ).solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        submit.assert_not_called()
 
     def test_malformed_model_messages_return_failure_without_dispatch(self):
         for reply in ([], None, {"content": []}, {"tool_calls": {}},

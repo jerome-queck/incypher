@@ -39,6 +39,12 @@ class PlaybookTests(unittest.TestCase):
         self.assertEqual(playbook_for("(Practice) (Practice) web"), unknown)
         self.assertEqual(playbook_for("(Practice) web/pwn"), unknown)
 
+    def test_network_guidance_covers_framing_and_aligned_known_plaintext(self):
+        guidance = playbook_for("network")
+        self.assertIn("byte-exact framing", guidance)
+        self.assertIn("known-plaintext", guidance)
+        self.assertIn("position-dependent", guidance)
+
 
 if __name__ == "__main__":
     unittest.main()

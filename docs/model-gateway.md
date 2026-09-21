@@ -10,8 +10,10 @@ The active Brain retains the inherited compatible endpoint's core tool fields an
 legacy completion limit for opaque providers, but infers no reasoning or temperature.
 A provider known to
 support an OpenRouter-shaped `reasoning` field may receive `{"effort":"high"}`; a
-provider declaring `reasoning_effort` receives the scalar form. No model fallback or
-identity substitution occurs. The gateway performs one finite-timeout transport call
+provider declaring `reasoning_effort` receives the scalar form. No substitution occurs
+for an explicit runtime model. The Day-2 image-default discovery policy may resolve a
+different catalogue-advertised model before the first request; that resolved identity is
+then exact. The gateway performs one finite-timeout transport call
 and never automatically retries a paid request.
 
 The gateway enforces its own caller-return deadline with a daemon transport worker even
@@ -19,7 +21,8 @@ when an injected transport ignores its timeout argument. Python cannot safely ca
 blocked thread or prove whether the remote provider charged/completed the request. Such
 a timeout is therefore explicitly unresolved: keep its budget reservation unsettled.
 The same gateway rejects another call while that worker remains alive. Process exit is
-the only hard cancellation boundary for a permanently blocked transport.
+the only hard cancellation boundary for a permanently blocked transport, so the arena
+coordinator stops that process instead of starting another challenge dispatch.
 
 Responses retain the assistant message, observed model, token counts and cost. Cost is
 classified as `measured`, `estimated` or `unknown`; missing or malformed usage is not
@@ -43,7 +46,20 @@ when measured. The durable ledger defaults to `/work/model-budget.sqlite3`, an U
 admission ceiling and USD 1 opaque-price reservations, leaving USD 15 of the competition
 allowance unadmitted for recovery/verification. The ceiling cannot exceed USD 85; opaque
 reservations must remain USD 0.05–5. Optional environment tuning is bounded;
-Day 2 still requires only the organiser's injected model triplet.
+Day 2 requires the organiser's injected endpoint/key plus the authoritative
+[provider-discovery policy](provider-discovery.md).
+
+The ledger also stores its first-start wall time. Arena mode compares durable measured,
+estimated and unresolved spend, plus the next conservative reservation, with a linear
+budget target over `MODEL_BUDGET_WINDOW_SECONDS` (default 23,400 seconds). It requests
+high reasoning while starting, on pace or behind, and medium while materially ahead;
+completion capacity remains 4,096 tokens in every posture. The reasoning field is sent
+only when exact-model discovery advertises `reasoning` or `reasoning_effort`. Local
+practice, validation and direct Brain use default to fixed high; only the arena wrapper
+enables adaptive pacing when no explicit mode was supplied. Pacing changes request
+intensity, never the configured model identity or durable dollar ceiling.
+Each model-facing budget notice reports both the durable average spend per elapsed minute
+and the target rate; the posture compares cumulative projected spend with the target.
 
 Limits: there is no generic provider meter or generation-ID reconciliation in the image;
 the SQLite file is not encrypted; a timed-out transport thread cannot be forcibly killed;

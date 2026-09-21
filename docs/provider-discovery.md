@@ -25,6 +25,14 @@ and prefer measured response cost for settlement.
 stores the API key, endpoint or raw provider response/error. Discovery has no network
 implementation of its own; integration owns the bounded fetch transport.
 
+Day 2 supplies endpoint/key but no model. Only when the entrypoint marks its image default
+as discoverable, `discover_served_model` derives the same-origin HTTPS `/models` URL and
+performs one authenticated bounded lookup. The exact image default wins when served;
+otherwise the first explicitly tool-capable entry wins, or the provider's first entry when
+capability metadata is absent. Malformed, empty, unavailable or unsafe catalogues stop
+before model dispatch; the image never sends an unadvertised default. Explicit Day-1/runtime
+models never substitute. This is the authoritative Day-2 selection policy.
+
 `agent_ext.playbooks.playbook_for(category)` returns one compact deterministic hint for
 the exact trusted category labels web, pwn, network, crypto, rev, forensics, misc or
 unknown. One exact leading `(Practice)` marker from trusted organiser metadata is

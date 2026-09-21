@@ -7,8 +7,8 @@ See [current activation status](context.md) before assuming an adapter is live.
 ## Active boundary
 
 ```text
-entrypoint.sh -> arena_main.py (trusted ranking/state/context shim)
-  -> inherited main.py (enumeration, sole official results writer)
+entrypoint.sh -> arena_main.py (trusted ranking/state/context + bounded pass shim)
+  -> inherited main.py (each serial enumeration, sole official results writer)
     -> inherited solver.py (files, instances, timing)
       -> Brain(run_bash, submit_flag, max_steps).solve(prompt)
 ```
@@ -53,9 +53,12 @@ duplicate candidates within one solve. `correct` is acceptance; `already_solved`
 the harness's terminal success convention without proving this candidate was accepted.
 The normal loop has durable model-cost reservation/settlement and a separate bounded
 runtime-state database for challenge outcomes, finite ranking backoff, scoped command
-fingerprints and sanitized summaries. Accepted model turns and new tool observations
-checkpoint scheduler progress before final/crash classification. It has no durable
-candidate reconciliation.
+fingerprints and typed safe findings. Accepted model turns and new tool observations
+checkpoint scheduler progress before final/crash classification. Before callback dispatch,
+the active shell durably stores only a scope-keyed candidate identity, then commits a
+separate dispatch-possible marker. Uncertain effects block that exact material/instance
+scope until trusted catalogue reconciliation; attributable terminal outcomes remain as
+idempotent tombstones through the outer checkpoint, and other work continues.
 
 ## Limits and change coordination
 
@@ -63,10 +66,14 @@ Model calls default to 120 seconds and are also bounded by the trusted eight-min
 attempt deadline. The compatible managed shell retains `/bin/bash -lc` but streams both
 outputs to a 12 KB cap, uses 45-second ordinary/90-second heavy bounds within the attempt
 deadline, and reaps process groups. Brain step, tool, submission and USD admission limits
-are finite. The gateway returns on its
+are finite. The inherited `MAX_STEPS` value is the strictly validated per-slice model-call
+cap; trusted point metadata does not silently replace it. Coordinator limits and
+continuation rules are authoritative in [strategy.md](strategy.md). The gateway returns on its
 deadline and blocks overlapping dispatch while an unresolved transport worker remains;
 Python cannot forcibly cancel that worker. Shell work may overlap through at most two
 attempt-scoped handles; model conversations and inherited challenge lifecycles remain serial.
+The wrapper can rerun the exact inherited main serially within those bounds. Every pass
+retains inherited filtering, lifecycle, submission and results ownership.
 
 A malformed tool request is rejected before dispatch. The optional bridge can classify
 that rejection through `Brain._invalid_tool_arguments`; preserve that hook when changing

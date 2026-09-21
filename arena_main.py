@@ -7,14 +7,24 @@ import ast
 import hashlib
 import importlib
 import inspect
+import json
+import math
 import os
+import re
 import textwrap
 import time
+import urllib.request
 from collections.abc import Mapping
 
 from agent_ext.managed_shell import ManagedShell, RESOURCE_STATUSES, parse_shell_projection
 from agent_ext.resources import Admission, Capacity
-from agent_ext.runtime_context import bind_prepared_material, current_attempt, trusted_attempt
+from agent_ext.runtime_context import (
+    Finding,
+    FindingDisposition,
+    bind_prepared_material,
+    current_attempt,
+    trusted_attempt,
+)
 from agent_ext.runtime_state import AttemptOutcome, RuntimeState, RuntimeStateError
 
 
@@ -39,6 +49,16 @@ _OFFICIAL_AST = {
     "is_practice": "d6e6b7c08dbe14b5094e557787c911c792e488ba163fbb11f10f36772371aa05",
     "client_init": "40b975045df8353cd811139e3fdd9266f976daa68c416e7a0db5a5aa92552b2c",
 }
+_MAX_SLICE_MODEL_CALLS = 150
+_MAX_RUN_SECONDS = 24 * 60 * 60
+_PASS_COOLDOWN_SECONDS = 2.0
+_PASS_RECOVERY_SECONDS = 30.0
+_CATALOGUE_REFRESH_SECONDS = 300.0
+_SCOREBOARD_URL = "https://hackathonlive.in-cypher.com/scores"
+_SCOREBOARD_MAX_BYTES = 256 * 1024
+_SCOREBOARD_EVENT_RE = re.compile(
+    rb'<script[^>]*\bid=["\']ev["\'][^>]*>(.*?)</script\s*>', re.DOTALL
+)
 
 
 def _require_signature(function, names, label):
@@ -81,16 +101,117 @@ class _RankedId(int):
         return int.__lt__(self, other)
 
 
+def _scoreboard_crowd_counts(body: bytes) -> dict[str, int]:
+    if not isinstance(body, bytes) or len(body) > _SCOREBOARD_MAX_BYTES:
+        raise ValueError("scoreboard response exceeded its bound")
+    match = _SCOREBOARD_EVENT_RE.search(body)
+    if match is None:
+        raise ValueError("scoreboard event feed is unavailable")
+    payload = json.loads(match.group(1))
+    recent = payload.get("recent") if isinstance(payload, Mapping) else None
+    if not isinstance(recent, list) or len(recent) > 128:
+        raise ValueError("scoreboard event feed changed")
+    counts: dict[str, int] = {}
+    for event in recent:
+        if not isinstance(event, Mapping):
+            continue
+        challenge = event.get("challenge")
+        if not isinstance(challenge, str) or not 1 <= len(challenge) <= 200:
+            continue
+        key = challenge.casefold()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _public_scoreboard_crowd_counts() -> dict[str, int]:
+    request = urllib.request.Request(
+        _SCOREBOARD_URL,
+        headers={"User-Agent": "InCypher-Team63-Agent/1"},
+    )
+    response = urllib.request.urlopen(request, timeout=3)
+    try:
+        body = response.read(_SCOREBOARD_MAX_BYTES + 1)
+    finally:
+        response.close()
+    return _scoreboard_crowd_counts(body)
+
+
+class _CatalogueCache:
+    """Bound trusted catalogue reads while allowing local reranking every slice."""
+
+    def __init__(self, clock=None, crowd_source=None, on_refresh=None):
+        self._clock = clock or time.monotonic
+        self._crowd_source = crowd_source
+        self._on_refresh = on_refresh
+        self._briefs: tuple[dict, ...] | None = None
+        self._refresh_at = 0.0
+
+    def list_challenges(self, delegate) -> list[dict]:
+        now = float(self._clock())
+        if not math.isfinite(now):
+            raise RuntimeError("Catalogue clock changed; inspect runtime")
+        if self._briefs is None or now >= self._refresh_at:
+            try:
+                briefs = delegate.list_challenges()
+            except (OSError, TimeoutError):
+                if self._briefs is None:
+                    raise
+                self._refresh_at = now + _CATALOGUE_REFRESH_SECONDS
+                return [dict(item) for item in self._briefs]
+            if not isinstance(briefs, list) or any(
+                not isinstance(item, Mapping) for item in briefs
+            ):
+                raise RuntimeError("Official challenge catalogue changed; inspect base contract")
+            copied = [dict(item) for item in briefs]
+            if self._on_refresh is not None:
+                self._on_refresh(copied)
+            if self._crowd_source is not None:
+                try:
+                    crowd_counts = self._crowd_source()
+                except (OSError, TimeoutError, ValueError):
+                    crowd_counts = {}
+                if isinstance(crowd_counts, Mapping):
+                    for brief in copied:
+                        name = brief.get("name")
+                        if not isinstance(name, str):
+                            continue
+                        observed = crowd_counts.get(name.casefold(), 0)
+                        if type(observed) is not int or observed <= 0:
+                            continue
+                        existing = brief.get("solves", 0)
+                        if type(existing) is not int or existing < 0:
+                            existing = 0
+                        brief["solves"] = max(existing, observed)
+            self._briefs = tuple(copied)
+            self._refresh_at = now + _CATALOGUE_REFRESH_SECONDS
+        return [dict(item) for item in self._briefs]
+
+    def mark_solved(self, challenge_id: int) -> None:
+        if type(challenge_id) is not int or challenge_id <= 0 or self._briefs is None:
+            return
+        updated = []
+        for brief in self._briefs:
+            copied = dict(brief)
+            if copied.get("id") == challenge_id:
+                copied["solved"] = True
+            updated.append(copied)
+        self._briefs = tuple(updated)
+
+
 class _RankedClient:
-    def __init__(self, delegate, state: RuntimeState):
+    def __init__(
+        self,
+        delegate,
+        state: RuntimeState,
+        catalogue: _CatalogueCache | None = None,
+    ):
         self._delegate = delegate
         self._state = state
+        self._catalogue = catalogue or _CatalogueCache()
         self._solved: set[int] = set()
 
     def list_challenges(self):
-        briefs = self._delegate.list_challenges()
-        if not isinstance(briefs, list) or any(not isinstance(item, Mapping) for item in briefs):
-            raise RuntimeError("Official challenge catalogue changed; inspect base contract")
+        briefs = self._catalogue.list_challenges(self._delegate)
         ordered = self._state.rank_briefs(briefs)
         ranked = []
         self._solved = set()
@@ -112,6 +233,9 @@ class _RankedClient:
 
     def trusted_solved(self, challenge_id: int) -> bool:
         return int(challenge_id) in self._solved
+
+    def mark_solved(self, challenge_id: int) -> None:
+        self._catalogue.mark_solved(challenge_id)
 
     def __getattr__(self, name):
         return getattr(self._delegate, name)
@@ -136,6 +260,7 @@ class _StatefulShell:
         self._commands: dict[str, str] = {}
         self._failure: AttemptOutcome | None = None
         self._progress = 0
+        self._model_progress = 0
 
     def _get_shell(self) -> ManagedShell:
         if self._shell is None:
@@ -154,7 +279,7 @@ class _StatefulShell:
         return command in self._commands.values() or self._state.lookup(context, command)
 
     def _record(self, command: str, output: str) -> None:
-        status, _ = parse_shell_projection(output)
+        status, has_payload = parse_shell_projection(output)
         classified = None
         if status == "timeout":
             classified = AttemptOutcome.TIMEOUT
@@ -186,6 +311,33 @@ class _StatefulShell:
         context = current_attempt(required=True)
         self._state.record_challenge_progress(context.challenge_id)
         self._progress += 1
+        self._model_progress += 1
+
+    def checkpoint_finding(self, finding: Finding) -> FindingDisposition:
+        context = current_attempt(required=True)
+        disposition = self._state.checkpoint_finding(context, finding)
+        if disposition is FindingDisposition.SAVED:
+            self._state.record_challenge_progress(context.challenge_id)
+            self._progress += 1
+        return disposition
+
+    def reserve_submission(self, candidate: str) -> bool:
+        return self._state.reserve_submission(
+            current_attempt(required=True), candidate
+        )
+
+    def submission_reconciled(self) -> bool:
+        return self._state.submission_reconciled(current_attempt(required=True))
+
+    def mark_submission_dispatch_possible(self, candidate: str) -> bool:
+        return self._state.mark_submission_dispatch_possible(
+            current_attempt(required=True), candidate
+        )
+
+    def reconcile_submission(self, candidate: str, status: str) -> None:
+        self._state.reconcile_submission(
+            current_attempt(required=True), candidate, status
+        )
 
     def __call__(self, command: str) -> str:
         if self._duplicate(command):
@@ -240,14 +392,22 @@ class _StatefulShell:
     def progress(self) -> int:
         return self._progress
 
+    @property
+    def model_progress(self) -> int:
+        return self._model_progress
 
 def _failure_class(result: Mapping, shell: _StatefulShell) -> AttemptOutcome:
     error = str(result.get("error", "")).lower()
+    if error in {"tool call budget exhausted", "submission budget exhausted"}:
+        return shell.failure_outcome or AttemptOutcome.UNSOLVED
     if "timeout" in error:
         return AttemptOutcome.TIMEOUT
     if any(word in error for word in ("resource", "capacity", "output_limit", "queue_")):
         return AttemptOutcome.RESOURCE
-    if any(word in error for word in ("model request", "provider", "gateway", "budget")):
+    if any(
+        word in error
+        for word in ("model request", "malformed model", "provider", "gateway", "budget")
+    ):
         return AttemptOutcome.PROVIDER
     if "submission" in error or "verdict" in result:
         return AttemptOutcome.SUBMISSION
@@ -270,6 +430,91 @@ def _solved_result(challenge: Mapping) -> dict:
         "model_calls": 0,
         "tool_calls": 0,
     }
+
+
+def _deferred_result(challenge: Mapping, reason: str) -> dict:
+    return {
+        "id": int(challenge["id"]),
+        "name": challenge.get("name", "unknown"),
+        "category": challenge.get("category"),
+        "type": challenge.get("type"),
+        "had_files": False,
+        "had_instance": False,
+        "seconds": 0.0,
+        "solved": False,
+        "steps": 0,
+        "model_calls": 0,
+        "tool_calls": 0,
+        "error": "coordinator stopped: " + reason,
+    }
+
+
+class _OuterCoordinator:
+    """Bound repeated inherited lifecycles without owning their results."""
+
+    def __init__(self):
+        self.deadline = time.monotonic() + _MAX_RUN_SECONDS
+        self.stop_reason: str | None = None
+        self.begin_pass()
+
+    def begin_pass(self) -> None:
+        self.pass_calls = 0
+        self.pass_slices = 0
+        self.pass_all_solved = True
+        self.pass_waiting = False
+
+    def note_catalogue_solved(self) -> None:
+        self.pass_calls += 1
+
+    def note_waiting(self) -> None:
+        self.pass_waiting = True
+        self.pass_all_solved = False
+
+    def admit(self, max_steps: int) -> tuple[int | None, str | None]:
+        self.pass_calls += 1
+        if self.stop_reason is not None:
+            self.pass_all_solved = False
+            return None, self.stop_reason
+        if time.monotonic() >= self.deadline:
+            self.stop_reason = "run deadline"
+        if self.stop_reason is not None:
+            self.pass_all_solved = False
+            return None, self.stop_reason
+        if self.pass_slices:
+            self.pass_all_solved = False
+            return None, "queue reschedule"
+        self.pass_slices += 1
+        return max_steps, None
+
+    def note_result(
+        self,
+        *,
+        solved: bool,
+        budget_exhausted: bool = False,
+        unresolved_dispatch: bool = False,
+        submission_waiting: bool = False,
+    ) -> None:
+        if time.monotonic() >= self.deadline:
+            self.stop_reason = "run deadline"
+        if budget_exhausted:
+            self.stop_reason = "model budget exhausted"
+        if unresolved_dispatch:
+            self.stop_reason = "unresolved model dispatch"
+        if submission_waiting:
+            self.note_waiting()
+        if not solved:
+            self.pass_all_solved = False
+
+    def should_continue(self) -> bool:
+        if self.stop_reason is not None:
+            return False
+        if self.pass_waiting:
+            return time.monotonic() + _PASS_RECOVERY_SECONDS < self.deadline
+        if self.pass_calls == 0:
+            return time.monotonic() + _PASS_RECOVERY_SECONDS < self.deadline
+        if self.pass_slices == 0 or self.pass_all_solved:
+            return False
+        return time.monotonic() + _PASS_COOLDOWN_SECONDS < self.deadline
 
 
 def main():
@@ -323,9 +568,15 @@ def main():
     state = RuntimeState(os.environ.get("RUNTIME_STATE_PATH", "/work/runtime-state.sqlite3"))
     admission = Admission(Capacity(512 * 1024 * 1024, 64, active=2, heavy=1, queued=8))
     validation_selector = os.path.isfile("/opt/agent/.validation-id")
+    explicit_selector = validation_selector or bool(os.environ.get("ONLY_IDS", "").strip())
+    coordinator = _OuterCoordinator()
+    catalogue = _CatalogueCache(
+        crowd_source=_public_scoreboard_crowd_counts,
+        on_refresh=state.reconcile_submission_catalogue,
+    )
 
     def client_factory(base, token):
-        return _RankedClient(inherited_client(base, token), state)
+        return _RankedClient(inherited_client(base, token), state, catalogue)
 
     def scoped_build_prompt(ch, cdir, filenames, conn):
         context = bind_prepared_material(ch, cdir, filenames, conn)
@@ -337,24 +588,40 @@ def main():
 
     def scoped_solve(client, ch, max_steps):
         cid = ch.get("id")
+        if (
+            type(cid) is not int
+            or cid <= 0
+            or type(max_steps) is not int
+            or not 1 <= max_steps <= _MAX_SLICE_MODEL_CALLS
+        ):
+            raise RuntimeError("Official solve arguments changed; inspect base contract")
         if not validation_selector and isinstance(client, _RankedClient) and client.trusted_solved(cid):
+            coordinator.note_catalogue_solved()
             result = _solved_result(ch)
             state.record_challenge_outcome(int(cid), True, 0, AttemptOutcome.UNSOLVED)
             return result
+        allocated_steps, deferred = coordinator.admit(max_steps)
+        if deferred is not None:
+            return _deferred_result(ch, deferred)
+        assert allocated_steps is not None
         shell = _StatefulShell(state, admission, os.getcwd())
         started = time.perf_counter()
-        with trusted_attempt(ch):
+        with trusted_attempt(ch, deadline_monotonic=coordinator.deadline):
             solver_module.run_bash = shell
             try:
-                result = inherited_solve(client, ch, max_steps)
+                result = inherited_solve(client, ch, allocated_steps)
             except (
                 RuntimeStateError, OSError, ValueError, KeyError, TypeError,
                 RuntimeError, TimeoutError,
             ) as exc:
+                observed_model_calls = min(allocated_steps, shell.model_progress)
                 state.record_challenge_outcome(
                     int(cid), False, shell.progress, AttemptOutcome.CRASH
                 )
                 state.checkpoint()
+                coordinator.note_result(
+                    solved=False,
+                )
                 return {
                     "id": int(cid),
                     "name": ch.get("name", "unknown"),
@@ -365,7 +632,7 @@ def main():
                     "seconds": round(time.perf_counter() - started, 1),
                     "solved": False,
                     "steps": 0,
-                    "model_calls": 0,
+                    "model_calls": observed_model_calls,
                     "tool_calls": 0,
                     "error": f"{type(exc).__name__}: attempt crashed",
                 }
@@ -376,30 +643,80 @@ def main():
             state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
             raise RuntimeError("Official solve result changed; inspect base contract")
         solved = result.get("solved") is True
+        result_model_calls = result.get("model_calls", 0)
+        if (
+            type(result_model_calls) is not int
+            or not 0 <= result_model_calls <= allocated_steps
+        ):
+            state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
+            raise RuntimeError("Official model-call result changed; inspect base contract")
+        observed_model_calls = max(result_model_calls, shell.model_progress)
+        if observed_model_calls > allocated_steps:
+            state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
+            raise RuntimeError("Official model-call bound changed; inspect base contract")
         progress = max(shell.progress, min(
             1_000_000,
             max(0, int(result.get("model_calls", 0)))
             + max(0, int(result.get("tool_calls", 0))),
         ))
+        outcome = AttemptOutcome.SOLVED if solved else _failure_class(result, shell)
         state.record_challenge_outcome(
             int(cid), solved, progress,
-            AttemptOutcome.SOLVED if solved else _failure_class(result, shell),
+            outcome,
         )
+        if solved and isinstance(client, _RankedClient):
+            client.mark_solved(int(cid))
         state.checkpoint()
+        coordinator.note_result(
+            solved=solved,
+            budget_exhausted=(
+                str(result.get("error", "")).lower() == "model budget exhausted"
+            ),
+            unresolved_dispatch=(
+                str(result.get("error", "")) == "GatewayTimeout: model request failed"
+            ),
+            submission_waiting=(
+                str(result.get("error", ""))
+                == "submission unresolved: reconciliation required"
+            ),
+        )
         return result
 
     official_main.is_practice = lambda challenge: False
     official_main.CTFdClient = client_factory
     official_main.solve_challenge = scoped_solve
     solver_module.build_prompt = scoped_build_prompt
+    pacing_was_set = "MODEL_SPEND_PACING" in os.environ
+    pacing_before = os.environ.get("MODEL_SPEND_PACING")
     try:
-        return official_main.main()
+        if not validation_selector and not pacing_was_set:
+            os.environ["MODEL_SPEND_PACING"] = "adaptive"
+        while True:
+            coordinator.begin_pass()
+            return_code = official_main.main()
+            if return_code not in (None, 0):
+                return return_code
+            if explicit_selector and coordinator.pass_calls == 0:
+                return return_code
+            if not coordinator.should_continue():
+                return return_code
+            delay = (
+                _PASS_RECOVERY_SECONDS
+                if coordinator.pass_calls == 0 or coordinator.pass_waiting
+                else _PASS_COOLDOWN_SECONDS
+            )
+            time.sleep(delay)
     finally:
         official_main.is_practice = inherited_is_practice
         official_main.CTFdClient = inherited_client
         official_main.solve_challenge = inherited_solve
         solver_module.build_prompt = inherited_build_prompt
         solver_module.run_bash = inherited_run_bash
+        if pacing_was_set:
+            assert pacing_before is not None
+            os.environ["MODEL_SPEND_PACING"] = pacing_before
+        else:
+            os.environ.pop("MODEL_SPEND_PACING", None)
 
 
 if __name__ == "__main__":

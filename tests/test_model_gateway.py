@@ -5,6 +5,7 @@ import time
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from agent_ext.model_gateway import (
     BudgetLedger,
@@ -213,13 +214,24 @@ class LedgerTests(unittest.TestCase):
     def test_missing_usage_stays_reserved_across_restart_then_reconciles_late(self):
         self.ledger.reserve("late", "4")
         self.ledger.settle("late", usage())
+        started_at = self.ledger.snapshot().started_at
         restarted = BudgetLedger(self.path, "10")
         self.assertEqual(restarted.snapshot().unresolved_cost, Decimal("4"))
+        self.assertEqual(restarted.snapshot().started_at, started_at)
         snapshot = restarted.settle(
             "late", usage(Decimal("2.5"), CostProvenance.MEASURED)
         )
         self.assertEqual(snapshot.unresolved_cost, Decimal(0))
         self.assertEqual(snapshot.measured_cost, Decimal("2.5"))
+
+    def test_pacing_start_is_durable_across_restart(self):
+        path = Path(self.temporary.name) / "timed-budget.sqlite3"
+        with patch("agent_ext.model_gateway.time.time", return_value=1234.5):
+            ledger = BudgetLedger(path, "10")
+        self.assertEqual(ledger.snapshot().started_at, 1234.5)
+        with patch("agent_ext.model_gateway.time.time", return_value=9999.0):
+            restarted = BudgetLedger(path, "10")
+        self.assertEqual(restarted.snapshot().started_at, 1234.5)
 
     def test_restart_cannot_change_the_durable_limit(self):
         self.ledger.reserve("held", "4")

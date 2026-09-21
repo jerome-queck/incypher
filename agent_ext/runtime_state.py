@@ -8,6 +8,7 @@ in memory and are never written to SQLite.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -21,7 +22,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from .runtime_context import DYNAMIC_CHALLENGE_TYPES
+from .runtime_context import (
+    DYNAMIC_CHALLENGE_TYPES,
+    Finding,
+    FindingDisposition,
+    FindingKind,
+)
 
 
 MAX_PROJECTION_RECORDS = 16
@@ -30,6 +36,9 @@ MAX_SUMMARY_BYTES = 512
 MAX_SCOPE_OBSERVATIONS = 256
 MAX_TOTAL_OBSERVATIONS = 4096
 _MAX_CHALLENGES = 4096
+_MAX_SUBMISSION_INTENTS = 4096
+_CROWD_SOLVE_COUNT_CAP = 5
+_SUBMISSION_RECONCILE_SECONDS = 300.0
 _HASH_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _SECRET_PATTERNS = (
     re.compile(r"(?i)\b(?:flag|ctf)\{[^\r\n}]{1,512}\}"),
@@ -115,6 +124,7 @@ class ChallengeBrief:
     material_hash: str
     instance_hash: str | None = None
     solved: bool = False
+    crowd_solves: int = 0
 
     def __post_init__(self) -> None:
         _challenge_id(self.challenge_id)
@@ -122,6 +132,8 @@ class ChallengeBrief:
             raise ValueError("points must be a nonnegative integer")
         if type(self.solved) is not bool:
             raise ValueError("solved must be boolean")
+        if type(self.crowd_solves) is not int or self.crowd_solves < 0:
+            raise ValueError("crowd_solves must be a nonnegative integer")
         Scope(self.challenge_id, self.material_hash, self.kind, self.instance_hash)
 
     @property
@@ -250,6 +262,7 @@ class RuntimeState:
         self.before_commit = before_commit
         self._initialise_lock = threading.Lock()
         self._rank_scopes: dict[int, Scope] = {}
+        self._rank_eligible: dict[int, bool] = {}
         self._initialise()
 
     def _connect(self) -> sqlite3.Connection:
@@ -289,6 +302,7 @@ class RuntimeState:
                         challenge_kind TEXT NOT NULL,
                         instance_hash TEXT,
                         observation_kind TEXT NOT NULL,
+                        finding_kind TEXT,
                         command_fp TEXT,
                         output_fp TEXT,
                         summary TEXT NOT NULL,
@@ -297,10 +311,49 @@ class RuntimeState:
                     );
                     CREATE UNIQUE INDEX IF NOT EXISTS observations_command_dedupe
                         ON observations(scope_key, command_fp) WHERE command_fp IS NOT NULL;
+                    CREATE UNIQUE INDEX IF NOT EXISTS observations_finding_dedupe
+                        ON observations(scope_key, output_fp)
+                        WHERE observation_kind = 'finding' AND output_fp IS NOT NULL;
                     CREATE INDEX IF NOT EXISTS observations_scope_time
                         ON observations(scope_key, created_at DESC, id DESC);
+                    CREATE TABLE IF NOT EXISTS runtime_meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS runtime_submission_intents (
+                        scope_key TEXT NOT NULL,
+                        challenge_id INTEGER NOT NULL,
+                        candidate_fp TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        account_terminal INTEGER NOT NULL DEFAULT 0,
+                        updated_at REAL NOT NULL,
+                        PRIMARY KEY(scope_key, candidate_fp)
+                    );
+                    CREATE INDEX IF NOT EXISTS runtime_submission_challenge
+                        ON runtime_submission_intents(challenge_id);
                     """
                 )
+                columns = {
+                    row["name"] for row in connection.execute("PRAGMA table_info(observations)")
+                }
+                if "finding_kind" not in columns:
+                    connection.execute(
+                        "ALTER TABLE observations ADD COLUMN finding_kind TEXT"
+                    )
+                submission_columns = {
+                    row["name"] for row in connection.execute(
+                        "PRAGMA table_info(runtime_submission_intents)"
+                    )
+                }
+                if "account_terminal" not in submission_columns:
+                    connection.execute(
+                        """ALTER TABLE runtime_submission_intents
+                           ADD COLUMN account_terminal INTEGER NOT NULL DEFAULT 0"""
+                    )
+                    connection.execute(
+                        """UPDATE runtime_submission_intents SET account_terminal = 1
+                           WHERE status = 'already_solved'"""
+                    )
         except (OSError, sqlite3.Error) as exc:
             raise RuntimeStateError("runtime state is unavailable") from exc
 
@@ -319,6 +372,35 @@ class RuntimeState:
             except sqlite3.Error:
                 pass
             raise RuntimeStateError(f"{operation} was not committed") from exc
+
+    @staticmethod
+    def _submission_fingerprint(
+        connection: sqlite3.Connection, scope: Scope, candidate: str
+    ) -> str:
+        row = connection.execute(
+            "SELECT value FROM runtime_meta WHERE key = 'submission_secret'"
+        ).fetchone()
+        if row is None:
+            value = os.urandom(32).hex()
+            connection.execute(
+                "INSERT INTO runtime_meta(key, value) VALUES(?, ?)",
+                ("submission_secret", value),
+            )
+            secret = bytes.fromhex(value)
+            return hmac.new(
+                secret,
+                scope.key.encode("ascii") + b"\x00" + candidate.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+        try:
+            secret = bytes.fromhex(row["value"])
+        except (TypeError, ValueError):
+            raise RuntimeStateError("submission identity is invalid") from None
+        return hmac.new(
+            secret,
+            scope.key.encode("ascii") + b"\x00" + candidate.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     @staticmethod
     def _rollback(connection: sqlite3.Connection) -> None:
@@ -439,9 +521,10 @@ class RuntimeState:
             item_key = (
                 solved,
                 not eligible,
-                -brief.points,
-                -progress,
                 attempts,
+                -min(brief.crowd_solves, _CROWD_SOLVE_COUNT_CAP),
+                -progress,
+                brief.points,
                 brief.kind is ChallengeKind.DYNAMIC,
                 last_attempt,
                 brief.challenge_id,
@@ -455,6 +538,12 @@ class RuntimeState:
         challenge_id = _field(brief, "id", _field(brief, "challenge_id"))
         points = _field(brief, "value", _field(brief, "points", 0))
         solved = _field(brief, "solved", False)
+        crowd_solves = 0
+        for field_name in ("solves", "solve_count"):
+            candidate = _field(brief, field_name)
+            if type(candidate) is int and candidate >= 0:
+                crowd_solves = candidate
+                break
         challenge_type = str(
             _field(brief, "type", _field(brief, "challenge_type", ""))
         ).lower()
@@ -476,7 +565,15 @@ class RuntimeState:
             ).encode("ascii")
         ).hexdigest()
         instance = "pending" if kind is ChallengeKind.DYNAMIC else None
-        return ChallengeBrief(challenge_id, points, kind, material, instance, solved)
+        return ChallengeBrief(
+            challenge_id,
+            points,
+            kind,
+            material,
+            instance,
+            solved,
+            crowd_solves,
+        )
 
     def rank_briefs(
         self, briefs: Sequence[object], now: float | None = None
@@ -485,7 +582,249 @@ class RuntimeState:
         adapted = [self._brief_adapter(brief) for brief in briefs]
         self._rank_scopes = {brief.challenge_id: brief.scope for brief in adapted}
         by_id = {brief.challenge_id: original for brief, original in zip(adapted, briefs)}
-        return [by_id[item.brief.challenge_id] for item in self.rank(adapted, now=now)]
+        ranked = self.rank(adapted, now=now)
+        self._rank_eligible = {
+            item.brief.challenge_id: item.eligible for item in ranked
+        }
+        return [by_id[item.brief.challenge_id] for item in ranked]
+
+    def challenge_eligible(self, challenge_id: int) -> bool:
+        _challenge_id(challenge_id)
+        if challenge_id not in self._rank_eligible:
+            raise RuntimeStateError("challenge was not present in the trusted brief list")
+        return self._rank_eligible[challenge_id]
+
+    def submission_reconciled(self, context: object) -> bool:
+        """Return whether this exact prepared material/instance scope may solve."""
+        scope = scope_from_context(context)
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    """SELECT 1 FROM runtime_submission_intents
+                       WHERE (scope_key = ? AND status IN (
+                           'dispatch_possible', 'uncertain', 'unavailable'
+                       )) OR (challenge_id = ? AND (
+                           status IN ('accepted', 'already_solved', 'conflict')
+                           OR account_terminal = 1
+                       )) LIMIT 1""",
+                    (scope.key, scope.challenge_id),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("submission reconciliation read failed") from exc
+        return row is None
+
+    def reserve_submission(
+        self,
+        context: object,
+        candidate: str,
+        *,
+        now: float | None = None,
+    ) -> str:
+        """Reserve one exact candidate, returning reserved/rejected/blocked."""
+        scope = scope_from_context(context)
+        if not isinstance(candidate, str) or not 1 <= len(candidate) <= 1024:
+            raise ValueError("candidate must be bounded text")
+        instant = time.time() if now is None else float(now)
+        if not math.isfinite(instant):
+            raise ValueError("now must be finite")
+        try:
+            with closing(self._connect()) as connection:
+                self._begin(connection)
+                fingerprint = self._submission_fingerprint(connection, scope, candidate)
+                blocked = connection.execute(
+                    """SELECT 1 FROM runtime_submission_intents
+                       WHERE (scope_key = ? AND status IN (
+                           'dispatch_possible', 'uncertain', 'unavailable'
+                       )) OR (challenge_id = ? AND (
+                           status IN ('accepted', 'already_solved', 'conflict')
+                           OR account_terminal = 1
+                       )) LIMIT 1""",
+                    (scope.key, scope.challenge_id),
+                ).fetchone()
+                if blocked is not None:
+                    self._rollback(connection)
+                    return "blocked"
+                row = connection.execute(
+                    """SELECT status FROM runtime_submission_intents
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (scope.key, fingerprint),
+                ).fetchone()
+                if row is not None and row["status"] == "rejected":
+                    self._rollback(connection)
+                    return "rejected"
+                if row is not None and row["status"] != "reserved":
+                    self._rollback(connection)
+                    return "blocked"
+                if row is None:
+                    count = connection.execute(
+                        "SELECT COUNT(*) AS count FROM runtime_submission_intents"
+                    ).fetchone()["count"]
+                    if count >= _MAX_SUBMISSION_INTENTS:
+                        self._rollback(connection)
+                        raise RuntimeStateError("submission intent capacity reached")
+                connection.execute(
+                    """INSERT OR REPLACE INTO runtime_submission_intents(
+                           scope_key, challenge_id, candidate_fp, status, updated_at
+                       ) VALUES(?, ?, ?, 'reserved', ?)""",
+                    (scope.key, scope.challenge_id, fingerprint, instant),
+                )
+                self._commit(connection, "reserve_submission")
+                return "reserved"
+        except RuntimeStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("submission reservation failed") from exc
+
+    def mark_submission_dispatch_possible(
+        self,
+        context: object,
+        candidate: str,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        """Commit the effect boundary immediately before the trusted callback."""
+        scope = scope_from_context(context)
+        if not isinstance(candidate, str) or not 1 <= len(candidate) <= 1024:
+            raise ValueError("candidate must be bounded text")
+        instant = time.time() if now is None else float(now)
+        if not math.isfinite(instant):
+            raise ValueError("now must be finite")
+        try:
+            with closing(self._connect()) as connection:
+                self._begin(connection)
+                fingerprint = self._submission_fingerprint(connection, scope, candidate)
+                row = connection.execute(
+                    """SELECT status FROM runtime_submission_intents
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (scope.key, fingerprint),
+                ).fetchone()
+                if row is None:
+                    self._rollback(connection)
+                    raise RuntimeStateError("submission intent is unavailable")
+                if row["status"] != "reserved":
+                    self._rollback(connection)
+                    return False
+                connection.execute(
+                    """UPDATE runtime_submission_intents
+                       SET status = 'dispatch_possible', updated_at = ?
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (instant, scope.key, fingerprint),
+                )
+                self._commit(connection, "mark_submission_dispatch_possible")
+                return True
+        except RuntimeStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("submission dispatch marker failed") from exc
+
+    def reconcile_submission(
+        self,
+        context: object,
+        candidate: str,
+        status: str,
+        *,
+        now: float | None = None,
+    ) -> None:
+        """Resolve a dispatched candidate, retaining uncertain effects durably."""
+        scope = scope_from_context(context)
+        allowed = {
+            "correct", "incorrect", "already_solved", "ratelimited", "error", "uncertain",
+        }
+        if status not in allowed:
+            raise ValueError("unsupported submission status")
+        instant = time.time() if now is None else float(now)
+        if not math.isfinite(instant):
+            raise ValueError("now must be finite")
+        try:
+            with closing(self._connect()) as connection:
+                self._begin(connection)
+                fingerprint = self._submission_fingerprint(connection, scope, candidate)
+                row = connection.execute(
+                    """SELECT status, account_terminal FROM runtime_submission_intents
+                       WHERE scope_key = ? AND candidate_fp = ?""",
+                    (scope.key, fingerprint),
+                ).fetchone()
+                if row is None:
+                    self._rollback(connection)
+                    raise RuntimeStateError("submission intent is unavailable")
+                current = row["status"]
+                if current == "reserved":
+                    self._rollback(connection)
+                    raise RuntimeStateError("submission dispatch was not committed")
+                classified = {
+                    "correct": "accepted",
+                    "incorrect": "rejected",
+                    "already_solved": "already_solved",
+                    "ratelimited": "unavailable",
+                    "error": "unavailable",
+                    "uncertain": "uncertain",
+                }[status]
+                if current == "conflict":
+                    resolved = current
+                elif {current, classified} == {"accepted", "rejected"}:
+                    resolved = "conflict"
+                elif current in {"accepted", "rejected"}:
+                    resolved = current
+                elif classified in {"accepted", "rejected"}:
+                    resolved = classified
+                elif current == "already_solved" or classified == "already_solved":
+                    resolved = "already_solved"
+                else:
+                    resolved = classified
+                account_terminal = row["account_terminal"] or classified == "already_solved"
+                if resolved != current or account_terminal != row["account_terminal"]:
+                    connection.execute(
+                        """UPDATE runtime_submission_intents
+                           SET status = ?, account_terminal = ?, updated_at = ?
+                           WHERE scope_key = ? AND candidate_fp = ?""",
+                        (resolved, int(account_terminal), instant, scope.key, fingerprint),
+                    )
+                self._commit(connection, "reconcile_submission")
+        except RuntimeStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("submission reconciliation failed") from exc
+
+    def reconcile_submission_catalogue(
+        self,
+        briefs: Sequence[object],
+        *,
+        now: float | None = None,
+    ) -> None:
+        """Clear uncertainty only after a sufficiently later trusted catalogue read."""
+        adapted = [self._brief_adapter(brief) for brief in briefs]
+        solved = {brief.challenge_id: brief.solved for brief in adapted}
+        instant = time.time() if now is None else float(now)
+        if not math.isfinite(instant):
+            raise ValueError("now must be finite")
+        try:
+            with closing(self._connect()) as connection:
+                self._begin(connection)
+                for row in connection.execute(
+                    """SELECT scope_key, challenge_id, candidate_fp, status,
+                              account_terminal, updated_at
+                       FROM runtime_submission_intents"""
+                ):
+                    challenge_id = row["challenge_id"]
+                    if challenge_id not in solved:
+                        continue
+                    stale_reconcilable = not row["account_terminal"] and row["status"] in {
+                        "dispatch_possible", "uncertain", "unavailable",
+                    }
+                    if solved[challenge_id] or (stale_reconcilable and (
+                        instant - float(row["updated_at"])
+                        >= _SUBMISSION_RECONCILE_SECONDS
+                    )):
+                        connection.execute(
+                            """DELETE FROM runtime_submission_intents
+                               WHERE scope_key = ? AND candidate_fp = ?""",
+                            (row["scope_key"], row["candidate_fp"]),
+                        )
+                self._commit(connection, "reconcile_submission_catalogue")
+        except RuntimeStateError:
+            raise
+        except (sqlite3.Error, TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeStateError("catalogue reconciliation failed") from exc
 
     def record_challenge_outcome(
         self,
@@ -693,12 +1032,53 @@ class RuntimeState:
             sensitive_values=sensitive_values, now=now,
         )
 
+    def checkpoint_finding(
+        self,
+        context: Scope | object,
+        finding: Finding,
+        *,
+        now: float | None = None,
+    ) -> FindingDisposition:
+        """Persist one typed safe finding with exact, scope-local dedupe."""
+        if not isinstance(finding, Finding):
+            return FindingDisposition.REJECTED
+        if isinstance(context, Scope):
+            return FindingDisposition.REJECTED
+        scope = scope_from_context(context)
+        redaction_values = _field(context, "redaction_values", None)
+        if (
+            not isinstance(redaction_values, Sequence)
+            or isinstance(redaction_values, (str, bytes))
+            or finding.contains_redaction_value(redaction_values)
+        ):
+            return FindingDisposition.REJECTED
+        fingerprint = _fingerprint(json.dumps(
+            [finding.kind.value, finding.summary],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ))
+        recorded = self._record_observation(
+            scope,
+            ObservationKind.FINDING,
+            finding.summary,
+            finding_kind=finding.kind,
+            output_fp=fingerprint,
+            progress=1,
+            now=now,
+        )
+        return (
+            FindingDisposition.SAVED
+            if recorded
+            else FindingDisposition.DUPLICATE
+        )
+
     def _record_observation(
         self,
         scope: Scope,
         kind: ObservationKind,
         summary: str,
         *,
+        finding_kind: FindingKind | None = None,
         command_fp: str | None = None,
         output_fp: str | None = None,
         progress: int = 0,
@@ -707,9 +1087,14 @@ class RuntimeState:
     ) -> bool:
         if not isinstance(scope, Scope) or not isinstance(kind, ObservationKind):
             raise ValueError("typed scope and observation kind required")
+        if finding_kind is not None and (
+            kind is not ObservationKind.FINDING
+            or not isinstance(finding_kind, FindingKind)
+        ):
+            raise ValueError("finding kind is valid only for typed findings")
         if type(progress) is not int or not 0 <= progress <= 1_000_000:
             raise ValueError("progress must be a bounded nonnegative integer")
-        clean = _sanitize(summary, sensitive_values)
+        clean = summary if finding_kind is not None else _sanitize(summary, sensitive_values)
         instant = time.time() if now is None else float(now)
         if not math.isfinite(instant):
             raise ValueError("now must be finite")
@@ -721,14 +1106,15 @@ class RuntimeState:
                         """
                         INSERT INTO observations(
                             scope_key, challenge_id, material_hash, challenge_kind,
-                            instance_hash, observation_kind, command_fp, output_fp,
-                            summary, progress, created_at
-                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            instance_hash, observation_kind, finding_kind, command_fp,
+                            output_fp, summary, progress, created_at
+                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             scope.key, scope.challenge_id, scope.material_hash, scope.kind.value,
-                            scope.instance_hash, kind.value, command_fp, output_fp, clean,
-                            progress, instant,
+                            scope.instance_hash, kind.value,
+                            finding_kind.value if finding_kind is not None else None,
+                            command_fp, output_fp, clean, progress, instant,
                         ),
                     )
                 except sqlite3.IntegrityError:
@@ -763,6 +1149,16 @@ class RuntimeState:
                 and row["challenge_kind"] == scope.kind.value
                 and row["instance_hash"] == scope.instance_hash
                 and ObservationKind(row["observation_kind"])
+                and (
+                    (
+                        row["observation_kind"] == ObservationKind.FINDING.value
+                        and FindingKind(row["finding_kind"])
+                    )
+                    or (
+                        row["observation_kind"] != ObservationKind.FINDING.value
+                        and row["finding_kind"] is None
+                    )
+                )
                 and isinstance(summary, str)
                 and 0 < len(summary.encode("utf-8")) <= MAX_SUMMARY_BYTES
                 and type(row["progress"]) is int
@@ -791,12 +1187,15 @@ class RuntimeState:
         for row in rows:
             if len(lines) >= MAX_PROJECTION_RECORDS or not self._valid_observation(row, scope):
                 continue
+            projected = {
+                "kind": row["observation_kind"],
+                "summary": row["summary"],
+                "progress": row["progress"],
+            }
+            if row["finding_kind"] is not None:
+                projected["finding_kind"] = row["finding_kind"]
             record = json.dumps(
-                {
-                    "kind": row["observation_kind"],
-                    "summary": row["summary"],
-                    "progress": row["progress"],
-                },
+                projected,
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),

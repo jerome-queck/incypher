@@ -393,6 +393,7 @@ class LedgerSnapshot:
     available: Decimal
     exhausted: bool
     record_count: int
+    started_at: float
 
 
 class BudgetLedger:
@@ -466,6 +467,17 @@ class BudgetLedger:
                 )
             elif Decimal(prior["value"]) != self.limit:
                 raise ValueError("budget limit differs from the durable ledger")
+            started = connection.execute(
+                "SELECT value FROM model_budget_meta WHERE key = 'started_at'"
+            ).fetchone()
+            if started is None:
+                first_call = connection.execute(
+                    "SELECT MIN(created_at) AS value FROM model_budget_calls"
+                ).fetchone()["value"]
+                connection.execute(
+                    "INSERT INTO model_budget_meta(key, value) VALUES('started_at', ?)",
+                    (str(time.time() if first_call is None else first_call),),
+                )
 
     @staticmethod
     def _totals(connection: sqlite3.Connection) -> tuple[Decimal, Decimal, Decimal, int]:
@@ -587,7 +599,16 @@ class BudgetLedger:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
             measured, estimated, unresolved, count = self._totals(connection)
+            started_row = connection.execute(
+                "SELECT value FROM model_budget_meta WHERE key = 'started_at'"
+            ).fetchone()
             connection.execute("COMMIT")
+        try:
+            started_at = float(started_row["value"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise ValueError("budget ledger start is invalid") from None
+        if not math.isfinite(started_at):
+            raise ValueError("budget ledger start is invalid")
         committed = measured + estimated + unresolved
         available = max(Decimal(0), self.limit - committed)
         return LedgerSnapshot(
@@ -599,4 +620,5 @@ class BudgetLedger:
             available,
             available == 0,
             count,
+            started_at,
         )

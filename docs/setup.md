@@ -19,11 +19,22 @@ values override the file. `doctor` reports presence only, not validity or secret
 | `LLM_BASE_URL` | Own provider's OpenAI-compatible base or full `/chat/completions` URL |
 | `LLM_MODEL` | Provider-supported tool-calling model for local API practice/Day 1 |
 | `LLM_API_KEY` | Provider API key; never a Codex login/access token |
-| `MAX_STEPS`, `MAX_SUBMISSIONS` | Local attempt bounds; see code for defaults |
+| `MAX_STEPS` | Model calls per challenge slice, integer 1–150; packaged default 12 |
+| `MAX_TOOL_CALLS`, `MAX_SUBMISSIONS` | Local per-slice tool/submission bounds; defaults 12/3 |
+| `MODEL_BUDGET_USD` | Durable run admission ceiling, USD 0.05–85; set from known remaining allowance |
+| `MODEL_CALL_RESERVE_USD` | Per-call reserve when pricing is opaque, USD 0.05–5 |
+| `MODEL_BUDGET_WINDOW_SECONDS` | Arena spend-pacing window; default 23,400 seconds (6.5 hours) |
 
 The helper reads `.env` locally; Docker does not automatically read it. `practice`
-passes only allowlisted runtime names. `build --phase day2` passes no model secret.
-Platform credentials are never copied into images. This repo does not discover or
+passes only allowlisted runtime names, including the budget controls above. A budget
+ledger stores its initial dollar ceiling and rejects later reuse with a different ceiling;
+use a fresh work directory for a newly budgeted run. The solver does not query provider
+balance automatically. Local `practice` forces fixed-high reasoning while retaining the
+configured `LLM_MODEL`. `build --phase day2` passes no model secret; its image default is
+used only when the organiser supplies endpoint/key without a model.
+Day-1 builds may include the bounded model-budget policy values above alongside the model
+triplet; platform credentials are never copied.
+This repo does not discover or
 extract keys from another machine, browser, account cache or teammate.
 
 ## Local Codex practice
@@ -106,8 +117,9 @@ python scripts/arena.py check --image incypher-agent:day1
 python scripts/arena.py push --phase day1 --image incypher-agent:day1
 ```
 
-The helper creates a temporary mode-0600 file containing only `LLM_*`, supplies it as a
-BuildKit secret, and deletes the temporary file. Docker deliberately copies it into a
+The helper creates a temporary mode-0600 file containing the `LLM_*` triplet and any set
+model-budget policy values, supplies it as a BuildKit secret, and deletes the temporary
+file. Docker deliberately copies it into a
 mode-0400 image layer for Day 1. **The resulting image still contains that credential**;
 BuildKit does not remove a secret explicitly copied into the image. Push it only to the
 official team registry. Anyone able to read that image, including organisers, can read
@@ -125,7 +137,11 @@ Complete before the user-confirmed 22 Sep 10:00 SGT start:
    `build --phase day2`; no `INCLUDE_DAY1_LLM` or `VALIDATION_CHALLENGE_ID`.
 3. Run `check` on that exact image. This imports every packaged module and executes
    the bundled checker without a token. Confirm runtime `LLM_*` precedence and no
-   Day-1 secret/validation file. A structural pass does not validate the Day-2 model.
+   Day-1 secret/validation file. When only endpoint/key are present, the entrypoint marks
+   the image default for one bounded authenticated `/models` lookup: exact default wins,
+   otherwise selection follows [provider discovery](provider-discovery.md). Unavailable
+   discovery fails before dispatch. A structural pass does not validate the Day-2 endpoint
+   or model.
 4. Complete one authorized practice model/tool/submission test when credentials are
    available. Record source SHA, image/base digests, checks and sanitized result.
    Distinguish local and arena-origin evidence.

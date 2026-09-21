@@ -73,11 +73,16 @@ required by the override. `LLM_BASE_URL` may be either the API root or the compl
 `/chat/completions` URL. Missing configuration, HTTP errors, timeouts, and malformed responses
 become unsuccessful Brain results rather than empty success.
 
+The current Day-2 guide injects only endpoint/key. Before Python starts, `entrypoint.sh`
+fills the absent model from `ARENA_DEFAULT_LLM_MODEL` and marks only that image default for
+bounded same-origin catalogue discovery. An explicitly supplied model remains exact.
+
 Day 1 does not inject model values. The private release is built with the team env file mounted as
 a BuildKit secret and copied into a mode-0400 release layer. `entrypoint.sh` uses it only when all
-three `LLM_*` runtime variables are absent. A complete organiser-injected configuration wins; a
-partial runtime configuration is not mixed with fallback values and therefore fails explicitly in
-the Brain. The value is absent from Git, build arguments, Docker config metadata, and logs.
+three `LLM_*` runtime variables are absent. A complete runtime configuration wins; endpoint/key
+alone receive the public image model policy, while other partial or blank configurations are not
+mixed with the Day-1 fallback. The private value is absent from Git, build arguments, Docker config
+metadata, and logs.
 `INCLUDE_DAY1_LLM=1` separates this cache path from ordinary/day-2 builds. The file is never used
 for platform credentials and the image is pushed only to the official team registry.
 

@@ -4,6 +4,9 @@ import unittest
 from unittest.mock import patch
 
 from agent_ext.runtime_context import (
+    Finding,
+    FindingKind,
+    MAX_FINDING_BYTES,
     bind_prepared_material,
     current_attempt,
     trusted_attempt,
@@ -82,6 +85,89 @@ class RuntimeContextTests(unittest.TestCase):
             second = bind_prepared_material(challenge, directory, [], None)
         self.assertIsNotNone(first.instance_generation)
         self.assertNotEqual(first.instance_generation, second.instance_generation)
+
+    def test_finding_accepts_only_bounded_non_sensitive_semantics(self):
+        self.assertEqual(
+            Finding(
+                FindingKind.OBSERVED,
+                "The verifier compares decoded bytes before checking length.",
+            ).summary,
+            "The verifier compares decoded bytes before checking length.",
+        )
+        rejected = (
+            "INCYPHER{candidate}",
+            "Candidate is swordfish.",
+            "password=synthetic-value",
+            "Use https://example.invalid/path",
+            "Service is at 192.0.2.10",
+            "Try localhost:31337",
+            "Recovered 0123456789abcdef0123456789abcdef",
+            "Recovered ZQJTRPKMNVXHCBWLFDSAYUEG",
+            "Recovered sk-abcdefghijklmnop",
+            "key=synthetic-value",
+            "Authentication succeeded using admin:admin",
+            "Login accepted the value winter2026!",
+            "Reuse the connection endpoint",
+            " trailing whitespace ",
+            "line one\nline two",
+            "x" * (MAX_FINDING_BYTES + 1),
+        )
+        for summary in rejected:
+            with self.subTest(summary=summary[:40]):
+                with self.assertRaisesRegex(ValueError, "without sensitive data"):
+                    Finding(FindingKind.OBSERVED, summary)
+
+    def test_outer_deadline_caps_attempt_deadline(self):
+        with patch("agent_ext.runtime_context.time.monotonic", return_value=100.0):
+            with trusted_attempt(self.challenge, deadline_monotonic=125.0) as context:
+                self.assertEqual(context.deadline_monotonic, 125.0)
+        for invalid in (True, "125", float("nan"), float("inf")):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                ValueError, "outer deadline"
+            ):
+                with trusted_attempt(self.challenge, deadline_monotonic=invalid):
+                    pass
+
+    def test_connection_redaction_values_are_transient_and_repr_hidden(self):
+        connection = "nc synthetic-box 31337"
+        runtime_values = {
+            "CTF_TOKEN": "runtime-ctf-value",
+            "CTF_SESSION": "runtime-session-value",
+            "LLM_API_KEY": "runtime-model-value",
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, runtime_values, clear=False
+        ), trusted_attempt(self.challenge):
+            enriched = bind_prepared_material(
+                self.challenge, directory, [], connection
+            )
+            self.assertIn(connection, enriched.redaction_values)
+            for value in runtime_values.values():
+                self.assertIn(value, enriched.redaction_values)
+                self.assertNotIn(value, repr(enriched))
+                self.assertNotIn(value, enriched.public_prompt())
+            self.assertNotIn(connection, repr(enriched))
+            self.assertNotIn("synthetic-box", repr(enriched))
+            self.assertNotIn("synthetic-box", enriched.public_prompt())
+
+        with tempfile.TemporaryDirectory() as directory, trusted_attempt(self.challenge):
+            short = bind_prepared_material(self.challenge, directory, [], "nc xy 7")
+            self.assertTrue(
+                Finding(
+                    FindingKind.OBSERVED,
+                    "The route label is XY and stage is 7.",
+                ).contains_redaction_value(short.redaction_values)
+            )
+        with tempfile.TemporaryDirectory() as directory, trusted_attempt(self.challenge):
+            compound = bind_prepared_material(
+                self.challenge, directory, [], "nc target-prod 31337"
+            )
+            self.assertTrue(
+                Finding(
+                    FindingKind.OBSERVED,
+                    "The prod service parses length first.",
+                ).contains_redaction_value(compound.redaction_values)
+            )
 
 
 if __name__ == "__main__":

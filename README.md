@@ -33,7 +33,7 @@ CTFd access-token settings; it also logs into the registry. Never commit the fil
 | Local Codex practice | This machine's own `codex login` subscription | [Local Codex workflow](docs/setup.md#local-codex-practice) |
 | Local submitted-solver practice | Provider `LLM_*` API configuration in `.env` | [API-backed practice](docs/setup.md#api-backed-practice) |
 | Day-1 arena image | Own provider API key, bundled only in private release layer | [Day 1](docs/setup.md#day-1-release) |
-| Day-2 arena image | Organiser injects all three `LLM_*` values | [Day 2](docs/setup.md#day-2-release) |
+| Day-2 arena image | Organiser injects endpoint/key; image selects a served model | [Day 2](docs/setup.md#day-2-release) |
 
 Local Codex is a separate solver/development workflow. The submitted `brain.py` calls
 Chat Completions; it cannot consume a ChatGPT subscription token. No CLI-to-API bridge

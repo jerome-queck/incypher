@@ -3,6 +3,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from agent_ext.runtime_state import (
     AttemptOutcome,
@@ -15,6 +16,7 @@ from agent_ext.runtime_state import (
     RuntimeStateError,
     Scope,
 )
+from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
 
 class RuntimeStateTests(unittest.TestCase):
@@ -25,6 +27,16 @@ class RuntimeStateTests(unittest.TestCase):
         self.store = RuntimeState(self.path)
         self.static = Scope(7, "material-a", ChallengeKind.STATIC)
         self.dynamic = Scope(8, "material-b", ChallengeKind.DYNAMIC, "instance-a")
+
+    @staticmethod
+    def finding_context(scope, redaction_values=()):
+        return SimpleNamespace(
+            challenge_id=scope.challenge_id,
+            material_ref=scope.material_hash,
+            challenge_type=scope.kind.value,
+            instance_generation=scope.instance_hash,
+            redaction_values=tuple(redaction_values),
+        )
 
     def test_partial_transaction_rolls_back(self):
         def fail(operation):
@@ -49,7 +61,7 @@ class RuntimeStateTests(unittest.TestCase):
         lock.execute("ROLLBACK")
 
     def test_corrupt_and_oversized_rows_are_ignored(self):
-        self.store.record_observation(self.static, ObservationKind.FINDING, "valid")
+        self.store.record_observation(self.static, ObservationKind.TOOL, "valid")
         connection = sqlite3.connect(self.path)
         connection.execute(
             """INSERT INTO observations(scope_key, challenge_id, material_hash,
@@ -68,8 +80,14 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertIn("valid", projection.text)
 
     def test_static_and_dynamic_scope_mismatch(self):
-        self.store.record_observation(self.static, ObservationKind.FINDING, "static evidence")
-        self.store.record_observation(self.dynamic, ObservationKind.FINDING, "dynamic evidence")
+        self.store.checkpoint_finding(
+            self.finding_context(self.static),
+            Finding(FindingKind.OBSERVED, "Static evidence is reusable."),
+        )
+        self.store.checkpoint_finding(
+            self.finding_context(self.dynamic),
+            Finding(FindingKind.OBSERVED, "Dynamic evidence is reusable."),
+        )
         changed_material = Scope(7, "material-new", ChallengeKind.STATIC)
         changed_instance = Scope(8, "material-b", ChallengeKind.DYNAMIC, "instance-b")
         self.assertEqual(self.store.project(changed_material).record_count, 0)
@@ -82,10 +100,98 @@ class RuntimeStateTests(unittest.TestCase):
         other = Scope(9, "material-a", ChallengeKind.STATIC)
         self.assertFalse(self.store.command_seen(other, "id"))
 
+    def test_checkpoint_finding_is_typed_exact_and_scope_specific(self):
+        finding = Finding(
+            FindingKind.OBSERVED,
+            "The decoder applies XOR after reversing each input block.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(self.finding_context(self.static), finding, now=1),
+            FindingDisposition.SAVED,
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(self.finding_context(self.static), finding, now=2),
+            FindingDisposition.DUPLICATE,
+        )
+        other = Scope(9, "material-a", ChallengeKind.STATIC)
+        self.assertIs(
+            self.store.checkpoint_finding(self.finding_context(other), finding, now=3),
+            FindingDisposition.SAVED,
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(
+                self.finding_context(self.static), finding.summary, now=4
+            ),
+            FindingDisposition.REJECTED,
+        )
+        projection = self.store.project(self.static)
+        self.assertEqual(projection.record_count, 1)
+        self.assertIn(finding.summary, projection.text)
+        self.assertIn('"progress":1', projection.text)
+        self.assertIn('"finding_kind":"observed"', projection.text)
+        self.assertIs(
+            self.store.checkpoint_finding(self.static, finding, now=5),
+            FindingDisposition.REJECTED,
+        )
+
+    def test_connection_redaction_term_is_rejected_without_persistence(self):
+        class Context:
+            challenge_id = 7
+            material_ref = "material-a"
+            challenge_type = "static"
+            instance_generation = None
+            redaction_values = ("synthetic-box", "31337")
+
+        finding = Finding(
+            FindingKind.HYPOTHESIS,
+            "The synthetic-box process may parse length before content.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(Context(), finding),
+            FindingDisposition.REJECTED,
+        )
+        self.store.checkpoint()
+        payload = b"".join(path.read_bytes() for path in self.path.parent.glob("state.sqlite3*"))
+        self.assertNotIn(b"synthetic-box", payload)
+
+    def test_short_case_changed_connection_terms_are_rejected_before_write(self):
+        class Context:
+            challenge_id = 7
+            material_ref = "material-a"
+            challenge_type = "static"
+            instance_generation = None
+            redaction_values = ("nc xy 7",)
+
+        finding = Finding(
+            FindingKind.OBSERVED,
+            "The route label is XY and stage is 7.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(Context(), finding),
+            FindingDisposition.REJECTED,
+        )
+        self.store.checkpoint()
+        payload = b"".join(path.read_bytes() for path in self.path.parent.glob("state.sqlite3*"))
+        self.assertNotIn(b"route label", payload)
+
+    def test_unlabelled_runtime_credential_value_is_rejected_before_write(self):
+        context = self.finding_context(self.static, ("swordfish",))
+        finding = Finding(
+            FindingKind.OBSERVED,
+            "The derived label is SwordFish.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(context, finding),
+            FindingDisposition.REJECTED,
+        )
+        self.store.checkpoint()
+        payload = b"".join(path.read_bytes() for path in self.path.parent.glob("state.sqlite3*"))
+        self.assertNotIn(b"SwordFish", payload)
+
     def test_projection_is_bounded_and_sanitized(self):
         for index in range(40):
             self.store.record_observation(
-                self.static, ObservationKind.FINDING, f"record-{index} " + "x" * 600,
+                self.static, ObservationKind.TOOL, f"record-{index} " + "x" * 600,
                 progress=index,
             )
         projection = self.store.project(self.static)
@@ -105,7 +211,7 @@ class RuntimeStateTests(unittest.TestCase):
         first = self.store.rank(briefs, now=10.5)
         second = self.store.rank(briefs, now=10.5)
         self.assertEqual(first, second)
-        self.assertEqual([item.brief.challenge_id for item in first], [4, 3, 2, 1])
+        self.assertEqual([item.brief.challenge_id for item in first], [3, 4, 2, 1])
         self.assertFalse(first[2].eligible)
         self.store.checkpoint_outcome(briefs[1].scope, AttemptOutcome.TIMEOUT, now=12)
         self.assertEqual(self.store.rank(briefs, now=12)[2].backoff_seconds, 2)
@@ -122,6 +228,50 @@ class RuntimeStateTests(unittest.TestCase):
         self.store.record_challenge_outcome(2, False, 3, "timeout", now=10)
         ordered = self.store.rank_briefs(briefs, now=10.5)
         self.assertIs(ordered[-1], briefs[1])
+
+    def test_catalogue_crowd_solves_prioritize_likely_easy_work(self):
+        briefs = [
+            {"id": 1, "points": 100, "type": "standard", "solves": 1},
+            {"id": 2, "points": 110, "type": "standard", "solve_count": 0},
+            {"id": 3, "points": 0, "type": "standard", "solves": 10_000},
+        ]
+        ordered = self.store.rank_briefs(briefs, now=10)
+        self.assertEqual([brief["id"] for brief in ordered], [3, 1, 2])
+        self.assertIs(ordered[0], briefs[2])
+
+    def test_easy_first_work_cannot_monopolize_later_passes(self):
+        briefs = [
+            {"id": 1, "points": 500, "type": "standard", "solves": 0},
+            {"id": 2, "points": 100, "type": "standard", "solves": 0},
+        ]
+        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 2)
+        self.store.record_challenge_outcome(2, False, 1, "unsolved", now=10)
+        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 1)
+
+    def test_catalogue_crowd_solves_ignores_absent_or_malformed_values(self):
+        briefs = [
+            {"id": 1, "points": 100, "type": "standard", "solves": True},
+            {"id": 2, "points": 100, "type": "standard", "solves": -1},
+            {"id": 3, "points": 100, "type": "standard", "solves": "99"},
+            {"id": 4, "points": 100, "type": "standard"},
+            {
+                "id": 5,
+                "points": 100,
+                "type": "standard",
+                "solves": "bad",
+                "solve_count": 1,
+            },
+        ]
+        ordered = self.store.rank_briefs(briefs, now=10)
+        self.assertEqual([brief["id"] for brief in ordered], [5, 1, 2, 3, 4])
+
+    def test_catalogue_crowd_solves_do_not_change_scope_hash(self):
+        low = {"id": 7, "points": 100, "type": "standard", "solves": 1}
+        high = {"id": 7, "points": 100, "type": "standard", "solves": 1_000}
+        self.assertEqual(
+            self.store._brief_adapter(low).scope,
+            self.store._brief_adapter(high).scope,
+        )
 
     def test_dynamic_iac_brief_uses_restart_stable_dynamic_rank_scope(self):
         brief = {"id": 8, "points": 500, "type": "dynamic_iac", "solved": False}
@@ -144,6 +294,230 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertEqual(typed.progress, 3)
         self.assertEqual(typed.attempts, 0)
         self.assertTrue(typed.eligible)
+
+    def test_uncertain_submission_blocks_replay_until_later_catalogue_reconciliation(self):
+        brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
+        context = self.finding_context(self.static)
+        candidate = "INCYPHER{SUBMISSION_SENTINEL}"
+        self.store.rank_briefs([brief], now=10)
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=11), "blocked"
+        )
+        self.store.reconcile_submission(context, candidate, "uncertain", now=12)
+
+        self.assertFalse(self.store.submission_reconciled(context))
+        self.store.reconcile_submission_catalogue([brief], now=311.999)
+        self.assertFalse(self.store.submission_reconciled(context))
+        self.store.reconcile_submission_catalogue([brief], now=312)
+        self.assertTrue(self.store.submission_reconciled(context))
+
+        self.store.checkpoint()
+        payload = b"".join(
+            path.read_bytes() for path in self.path.parent.glob("state.sqlite3*")
+        )
+        self.assertNotIn(b"SUBMISSION_SENTINEL", payload)
+
+    def test_rejected_submission_tombstone_allows_a_different_candidate(self):
+        brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
+        context = self.finding_context(self.static)
+        self.store.rank_briefs([brief], now=10)
+        self.assertEqual(
+            self.store.reserve_submission(context, "INCYPHER{safe}", now=10),
+            "reserved",
+        )
+        self.assertTrue(self.store.mark_submission_dispatch_possible(
+            context, "INCYPHER{safe}", now=10.5
+        ))
+        self.store.reconcile_submission(context, "INCYPHER{safe}", "incorrect", now=11)
+        self.assertTrue(self.store.submission_reconciled(context))
+        self.assertEqual(
+            self.store.reserve_submission(context, "INCYPHER{safe}", now=12),
+            "rejected",
+        )
+        self.assertEqual(
+            self.store.reserve_submission(context, "INCYPHER{different}", now=12),
+            "reserved",
+        )
+
+    def test_dispatch_marker_survives_restart_and_is_scope_exact(self):
+        context = self.finding_context(self.static)
+        other = self.finding_context(Scope(7, "material-new", ChallengeKind.STATIC))
+        candidate = "INCYPHER{possible-effect}"
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+
+        restarted = RuntimeState(self.path)
+        self.assertFalse(restarted.submission_reconciled(context))
+        self.assertTrue(restarted.submission_reconciled(other))
+        self.assertEqual(
+            restarted.reserve_submission(other, candidate, now=12), "reserved"
+        )
+
+    def test_dispatch_marker_commit_failure_preserves_safe_reservation(self):
+        def fail(operation):
+            if operation == "mark_submission_dispatch_possible":
+                raise OSError("fault")
+
+        context = self.finding_context(self.static)
+        candidate = "INCYPHER{marker-not-committed}"
+        store = RuntimeState(self.path, before_commit=fail)
+        self.assertEqual(store.reserve_submission(context, candidate, now=10), "reserved")
+        with self.assertRaisesRegex(RuntimeStateError, "was not committed"):
+            store.mark_submission_dispatch_possible(context, candidate, now=11)
+
+        restarted = RuntimeState(self.path)
+        self.assertTrue(restarted.submission_reconciled(context))
+        self.assertEqual(
+            restarted.reserve_submission(context, candidate, now=12), "reserved"
+        )
+
+    def test_terminal_submission_replay_is_idempotent_and_conflict_is_durable(self):
+        context = self.finding_context(self.static)
+        replacement = self.finding_context(
+            Scope(7, "replacement-material", ChallengeKind.DYNAMIC, "new-instance")
+        )
+        candidate = "INCYPHER{accepted-before-checkpoint}"
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+        self.store.reconcile_submission(context, candidate, "correct", now=12)
+        self.store.reconcile_submission(context, candidate, "correct", now=13)
+        self.assertFalse(self.store.submission_reconciled(context))
+        self.assertFalse(self.store.submission_reconciled(replacement))
+        self.assertEqual(
+            self.store.reserve_submission(replacement, "INCYPHER{different}", now=13),
+            "blocked",
+        )
+
+        self.store.reconcile_submission(context, candidate, "incorrect", now=14)
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": False}],
+            now=1000,
+        )
+        self.assertFalse(self.store.submission_reconciled(context))
+        self.assertFalse(self.store.submission_reconciled(replacement))
+
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": True}],
+            now=1001,
+        )
+        self.assertTrue(self.store.submission_reconciled(context))
+        self.assertTrue(self.store.submission_reconciled(replacement))
+
+    def test_already_solved_blocks_replacement_scope_until_catalogue_confirms(self):
+        context = self.finding_context(self.static)
+        replacement = self.finding_context(
+            Scope(7, "replacement-material", ChallengeKind.DYNAMIC, "new-instance")
+        )
+        candidate = "INCYPHER{account-terminal}"
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+        self.store.reconcile_submission(context, candidate, "already_solved", now=12)
+        self.store.reconcile_submission(context, candidate, "incorrect", now=13)
+
+        self.assertFalse(self.store.submission_reconciled(replacement))
+        self.assertEqual(
+            self.store.reserve_submission(replacement, "INCYPHER{different}", now=13),
+            "blocked",
+        )
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": False}],
+            now=10_000,
+        )
+        self.assertFalse(self.store.submission_reconciled(replacement))
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": True}],
+            now=10_001,
+        )
+        self.assertTrue(self.store.submission_reconciled(replacement))
+
+    def test_already_solved_after_rejection_establishes_challenge_block(self):
+        context = self.finding_context(self.static)
+        replacement = self.finding_context(
+            Scope(7, "replacement-material", ChallengeKind.DYNAMIC, "new-instance")
+        )
+        candidate = "INCYPHER{account-terminal}"
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+        self.store.reconcile_submission(context, candidate, "incorrect", now=12)
+        self.store.reconcile_submission(context, candidate, "already_solved", now=13)
+        self.store.reconcile_submission(context, candidate, "correct", now=14)
+        with sqlite3.connect(self.path) as connection:
+            status, account_terminal = connection.execute(
+                """SELECT status, account_terminal FROM runtime_submission_intents
+                   WHERE challenge_id = 7"""
+            ).fetchone()
+        self.assertEqual((status, account_terminal), ("conflict", 1))
+        self.assertFalse(self.store.submission_reconciled(replacement))
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": False}],
+            now=10_000,
+        )
+        self.assertFalse(self.store.submission_reconciled(replacement))
+
+    def test_existing_account_terminal_intent_is_migrated_without_reopening(self):
+        old_path = self.path.parent / "legacy.sqlite3"
+        replacement = self.finding_context(
+            Scope(7, "replacement-material", ChallengeKind.DYNAMIC, "new-instance")
+        )
+        with sqlite3.connect(old_path) as connection:
+            connection.execute(
+                """CREATE TABLE runtime_submission_intents (
+                   scope_key TEXT NOT NULL, challenge_id INTEGER NOT NULL,
+                   candidate_fp TEXT NOT NULL, status TEXT NOT NULL,
+                   updated_at REAL NOT NULL, PRIMARY KEY(scope_key, candidate_fp))"""
+            )
+            connection.execute(
+                """INSERT INTO runtime_submission_intents
+                   VALUES (?, 7, 'legacy-fingerprint', 'already_solved', 10)""",
+                (self.static.key,),
+            )
+        restarted = RuntimeState(old_path)
+        self.assertFalse(restarted.submission_reconciled(replacement))
+        with sqlite3.connect(old_path) as connection:
+            account_terminal = connection.execute(
+                "SELECT account_terminal FROM runtime_submission_intents"
+            ).fetchone()[0]
+        self.assertEqual(account_terminal, 1)
+
+    def test_submission_reservation_commit_failure_fails_before_dispatch(self):
+        def fail(operation):
+            if operation == "reserve_submission":
+                raise OSError("fault")
+
+        store = RuntimeState(self.path, before_commit=fail)
+        with self.assertRaisesRegex(RuntimeStateError, "was not committed"):
+            store.reserve_submission(
+                self.finding_context(self.static), "INCYPHER{never-dispatched}", now=10
+            )
+
+        restarted = RuntimeState(self.path)
+        brief = {"id": 7, "points": 100, "type": "standard", "solved": False}
+        restarted.rank_briefs([brief], now=11)
+        self.assertTrue(restarted.submission_reconciled(
+            self.finding_context(self.static)
+        ))
 
     def test_restart_and_concurrent_readers(self):
         self.store.record_observation(self.static, ObservationKind.TOOL, "durable")

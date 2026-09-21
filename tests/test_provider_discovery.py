@@ -6,6 +6,7 @@ from agent_ext.provider_discovery import (
     DiscoveryCache,
     ModelPricing,
     discover_provider,
+    discover_served_model,
     estimate_max_cost,
 )
 
@@ -40,6 +41,42 @@ def fixture(model="openai/test-model", parameters=None, pricing=None):
 
 
 class ProviderDiscoveryTests(unittest.TestCase):
+    def test_served_model_discovery_prefers_configured_default_when_available(self):
+        document = {"data": [
+            {"id": "other/model", "supported_parameters": ["tools"]},
+            {"id": "openai/test-model", "supported_parameters": [
+                "reasoning_effort", "tools", "tool_choice",
+            ]},
+        ]}
+        resolved, result = discover_served_model(identity(), lambda *_: document)
+        self.assertEqual(resolved.model, "openai/test-model")
+        self.assertEqual(result.provenance, "compatible_catalogue")
+        self.assertIn("reasoning_effort", result.capabilities.optional_parameters)
+
+    def test_served_model_discovery_selects_first_tool_model_when_default_absent(self):
+        document = {"data": [
+            {"id": "text-only", "supported_parameters": ["temperature"]},
+            {"id": "served/tool", "supported_parameters": [
+                "tools", "tool_choice", "reasoning",
+            ]},
+            {"id": "served/other", "supported_parameters": ["tools"]},
+        ]}
+        resolved, result = discover_served_model(identity(), lambda *_: document)
+        self.assertEqual(resolved.model, "served/tool")
+        self.assertEqual(result.source, "compatible_catalogue")
+        self.assertIn("reasoning", result.capabilities.optional_parameters)
+
+    def test_served_model_discovery_falls_back_without_substitution_on_failure(self):
+        for endpoint, fetch in (
+            (CHAT, lambda *_: {"data": []}),
+            ("https://user@provider.test/v1/chat/completions", lambda *_: fixture()),
+        ):
+            with self.subTest(endpoint=endpoint):
+                original = identity(endpoint=endpoint)
+                resolved, result = discover_served_model(original, fetch)
+                self.assertEqual(resolved, original)
+                self.assertEqual(result.provenance, "unknown")
+
     def test_exact_openrouter_model_maps_only_gateway_parameters_and_pricing(self):
         calls = []
 

@@ -21,7 +21,9 @@ _PLAYBOOKS = {
     "network": (
         "Record byte-exact framing, direction, state transitions, timeouts and encodings. Build a "
         "minimal local parser/client and vary one field at a time. Distinguish transport failure "
-        "from protocol rejection; use only the trusted supplied connection endpoint."
+        "from protocol rejection; use only the trusted supplied connection endpoint. For aligned "
+        "known-plaintext and transformed samples, derive and test the position-dependent transform "
+        "or keystream in one script before trying broad cryptanalysis."
     ),
     "crypto": (
         "Write the exact equations and identify algebraic structure before brute force. Check "
