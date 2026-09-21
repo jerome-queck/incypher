@@ -1,2 +1,5 @@
 *
 !Dockerfile
+!brain.py
+!agent_ext/
+!agent_ext/**

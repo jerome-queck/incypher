@@ -14,3 +14,8 @@ codex-home/
 state/
 goal-objective.md
 competition-requirements.md
+__pycache__/
+*.pyc
+output/
+results.json
+work/
