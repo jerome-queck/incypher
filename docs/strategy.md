@@ -2,27 +2,30 @@
 
 ## Delivery status and scope
 
-This change implements the independent, offline part of Elson's assignment:
+This change implements Elson's policy modules and a shared-contract execution adapter:
 deterministic scheduling, bounded serial attempt decisions, evidence-aware
-continuation, retry classification, and owner handoffs. It adds no model client,
-Board client, command executor, flag submitter, results writer, or autonomous loop.
-It introduces no third-party runtime dependency.
+continuation, retry classification, owner handoffs, and one admitted attempt through
+the actual merged `Brain.solve` loop. It reuses the existing model implementation
+and authorized callbacks and introduces no third-party dependency or outer loop.
 
-**This is a draft integration slice, not a completed agent integration or a claim
-of better CTF performance.** The source baseline is
-`7fb4159857f1de56e79b4462ef05ea83b47eda1a` on `main`. The only changed paths are:
+**The real-Brain adapter is tested offline; live activation and owner implementations
+remain integration work.** The first policy commit was based on
+`7fb4159857f1de56e79b4462ef05ea83b47eda1a`. This revision incorporates merged
+foundation `ebddc8daa346248226450de629f72cfb4ffa8f9c` into the feature branch.
+The changed paths relative to that foundation are:
 
 - `agent_ext/controller.py`
 - `agent_ext/scheduler.py`
 - `agent_ext/retry_policy.py`
+- `agent_ext/strategy_bridge.py`
 - `tests/test_controller.py`
 - `tests/test_scheduler.py`
 - `tests/test_retry_policy.py`
+- `tests/test_strategy_bridge.py`
 - `docs/strategy.md`
 
-Jerome's foundation [PR #1](https://github.com/jerome-queck/incypher/pull/1) appeared
-during implementation. The reviewed draft head is
-`d48247e765aa68b4b3e593d084213be3405fde94`; it is not merged into this branch.
+Jerome's foundation [PR #1](https://github.com/jerome-queck/incypher/pull/1) is merged.
+The reviewed foundation merge is `ebddc8daa346248226450de629f72cfb4ffa8f9c`.
 Its `docs/interfaces.md`, `docs/arena-contract.md`, semantic records, adapters,
 and `brain.py` were inspected. Its documentation identifies the extension as
 `Brain(run_bash, submit_flag, max_steps).solve(prompt)`, handling **one challenge**.
@@ -32,14 +35,17 @@ instances, and the inherited harness owns official results output.
 Consequently the multi-challenge scheduler below is an **offline policy experiment**
 until Jerome identifies an authorized selection seam. It must not drive another
 challenge loop around the inherited harness. The controller can be evaluated with
-one qualified challenge at the Brain seam; wiring even that requires agreement
-on the shared records and callback budget/cancellation enforcement.
+one qualified challenge through `BrainAttempt.run`. Its tests use the merged Brain
+and shared records with synthetic evidence/ledger callbacks. Normal `Brain(...)`
+construction does not automatically select this adapter. Jerome must bind a trusted
+structured scope, remaining budget and production owner callbacks before activation.
 
-`main` still has a one-line Dockerfile and excludes everything except Dockerfile
-from the build context. These Python modules are therefore not in that baseline
-image. PR #1 proposes packaging changes; this PR makes none. No image build,
-structural checker, live evaluation, registry submission, or official-harness
-compatibility is claimed for these modules.
+The merged Dockerfile already copies `agent_ext/`, so a future build can include
+these sources without another packaging edit. This PR changes no shared contracts,
+`brain.py`, Dockerfile, entrypoint or owner files. Docker is unavailable on this
+workstation/WSL environment, so no new image smoke test or structural checker was
+run. The captain's reported image/arena evidence applies to his foundation, not
+automatically to these changes. No live evaluation or registry submission occurred.
 
 ## Your job scope: Elson
 
@@ -72,6 +78,7 @@ The supported calls are:
 | --- | --- |
 | `update_catalogue(challenges, now=...)` | Jerome supplies qualified, sanitized metadata. Bounded upsert; omission does not remove a task. A new material/instance identity retires prior continuation evidence. |
 | `next_action(now=...)` | Returns `ATTEMPT`, `WAIT`, or `STOP`, always with a reason. An attempt contains scope, authority reference, approach, token, deadline and separate request/tool allowances. |
+| `claim_attempt(attempt)` | Atomically reserves execution of that exact admitted object. `BrainAttempt` calls it so two adapters cannot execute one lease. Completion releases the execution claim. |
 | `finish_attempt(token, report, now=...)` | The owning executor reports actual resource counts, confirmed evidence references, a candidate reference, or a classified failure. A mismatched/duplicate token cannot release another attempt. |
 | `propose_approach(scope, approach_ref, justification_ref)` | A trusted owner may revive stalled work with a distinct, justified experiment. Old attempts, retry counts and failures remain. Justification references are retained. |
 | `observe_evidence(scope, evidence)` | Richard may supply newly confirmed evidence to revive `no_new_evidence` work within its remaining continuation allowance. |
@@ -256,9 +263,10 @@ From the repository root, the standard-library command is:
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-Use `python` on Windows. This slice has **76 tests**: 47 controller/lifecycle,
-17 retry, and 12 scheduler tests. They passed on Windows Python 3.13.6 and Ubuntu
-Python 3.12.3, with zero failures or skips. Controller and lifecycle fixtures forbid
+Use `python` on Windows. The combined suite has **125 tests**: 47 controller/lifecycle,
+17 retry, 12 scheduler, 31 real-Brain adapter, and 18 foundation tests.
+They passed on Windows Python 3.13.6 and Ubuntu Python 3.12.3, with zero failures
+or skips. Controller, lifecycle and real-Brain adapter fixtures forbid
 socket creation. The suite uses only synthetic metadata/candidates, injected time,
 in-memory owners, and short cancellable timers; no model, Board or credential is
 used. The inherited image's Python version and execution of these tests inside it
@@ -277,6 +285,10 @@ remain for the integration owner to verify.
 | Deferred work waits and eventually stops | `test_known_future_retry_is_not_cut_off_by_idle_grace`, `test_repeated_unchanged_catalogue_does_not_extend_idle_forever` |
 | Single owner and stale completion protection | `test_one_active_owner_even_with_concurrent_callers`, `test_stale_or_duplicate_completion_cannot_release_another_lease` |
 | Ambiguous intent survives wrong transition/poll/stop | `test_qualification_rejection_cannot_clear_ambiguous_submission`, `test_fake_ambiguous_submission_is_not_replayed_across_polls_or_stop` |
+| Merged Brain and shared records execute one qualified submission | `test_real_brain_loop_uses_shared_owners_before_single_submission`, `test_plain_text_candidate_goes_through_same_gate` |
+| Unknown callback verdict does not permit another candidate | `test_unknown_or_uncertain_verdict_never_sends_second_candidate`, `test_transport_exception_preserves_intent_and_sanitizes_error` |
+| Actual Brain model/tool dispatch obeys separate allowances | `test_shared_step_budget_caps_real_brain_model_calls`, `test_tool_budget_is_independent_of_number_of_calls_in_one_model_turn` |
+| Interrupt after a possible effect remains unresolved | `test_interrupt_during_submission_preserves_uncertainty_before_propagating`, `test_interrupt_during_model_releases_attempt_and_flushes_before_propagating` |
 
 `FakeOwners` in `tests/test_controller.py` consumes decisions through fake
 executor, qualifier, intent reservation, submitter and checkpoint methods.
@@ -310,55 +322,137 @@ accepted outcomes alongside measured elapsed time, calls, repeated work and cost
 Optional development checks (Ruff is not a runtime dependency):
 
 ```sh
-ruff check --isolated --select E,F,I,B,UP --ignore E501 agent_ext/controller.py agent_ext/scheduler.py agent_ext/retry_policy.py tests/test_controller.py tests/test_scheduler.py tests/test_retry_policy.py
-ruff format --isolated --check agent_ext/controller.py agent_ext/scheduler.py agent_ext/retry_policy.py tests/test_controller.py tests/test_scheduler.py tests/test_retry_policy.py
+ruff check --isolated --select E,F,I,B,UP --ignore E501 agent_ext/controller.py agent_ext/scheduler.py agent_ext/retry_policy.py agent_ext/strategy_bridge.py tests/test_controller.py tests/test_scheduler.py tests/test_retry_policy.py tests/test_strategy_bridge.py
+ruff format --isolated --check agent_ext/controller.py agent_ext/scheduler.py agent_ext/retry_policy.py agent_ext/strategy_bridge.py tests/test_controller.py tests/test_scheduler.py tests/test_retry_policy.py tests/test_strategy_bridge.py
 git diff --check
 ```
 
-## Mapping to Jerome's draft and remaining integration gate
+## Implemented mapping to the merged foundation
 
-The local records are deliberately labeled provisional. They are not imported
-from or exported through Jerome's unmerged `contracts.py`. This mapping describes
-the work to agree after he confirms the foundation is ready; it does not assert
-that integration already works.
+`strategy_bridge.py` imports the real `contracts.py`. The controller retains
+private policy state; conversion functions keep the shared boundary explicit.
 
-| Foundation record at reviewed PR #1 head | Mapping/decision still needed |
+| Merged foundation record | Implemented mapping |
 | --- | --- |
-| `ChallengeScope` | Map integer ID, material reference and instance generation to sanitized local `Scope`; retain parent `attempt_id`/session provenance. Category/name are metadata, not authority. Supply trusted `authority_ref` separately. Do not parse authority out of untrusted prompt text. |
-| `Budget` | Its decision steps, submissions and optional deadline do not represent all local model/tool counters. Agree counting and cap actual calls by both budgets. Richard's submission allowance remains authoritative. |
-| `NextAction` | Project a local decision into agreed kind/arguments/reason inside the existing Brain flow. Do not turn it into a second outer loop or a new command interpreter. |
-| `ToolResult` | Map measured counts/cost and classified failures through Aidan. An observation reference or successful exit alone is not confirmed progress; Richard must supply scope, kind and canonical identity. |
-| `Candidate` | Richard retains the sensitive value/evidence; provide a stable scoped fingerprint to this controller. No raw candidate in reasons, logs or snapshots. |
-| `SubmissionResult` | Richard's intent ledger must associate intent ID with exact scope/candidate. Correct/incorrect map to definitive owner outcomes. Uncertain/error/rate-limit outcomes preserve intent. Agree `already_solved` projection without claiming a fresh solve. |
+| `ChallengeScope` | `challenge_from_shared` validates the integer ID and parent attempt reference, hashes material/instance references into bounded private identities, and retains the full shared record for owner calls. Parent attempt changes do not invent new material. Display name/category are not authority or ranking measurements. A trusted authority reference is supplied separately. |
+| `Budget` | `BrainAttempt` caps Brain model steps by both shared steps and the admitted model allowance, checks the earliest shared/attempt/controller deadline, and blocks submission when shared allowance is zero. Tool dispatch has its separate admitted counter. |
+| `NextAction` | `action_from_decision` projects decision kind, arguments, reason and separate allowances. Owner observation callbacks also receive `NextAction("run_bash", ...)` for each admitted tool call. |
+| `ToolResult` | The owner supplies a bounded excerpt, measured/classified result, and a separate tuple of confirmed evidence. No successful exit, output string or provenance reference alone is promoted to progress. |
+| `Candidate` | The adapter captures a candidate from either Brain text or tool output, attaches confirmed evidence references, and hands this actual shared type to the owner. Controller state receives only its fingerprint. |
+| `SubmissionResult` | A reserved intent is mapped to the exact callback verdict. Missing, unknown, malformed, rate-limited and transport-error verdicts remain uncertain. Correct/incorrect map to definitive outcomes. `already_solved` retains the current harness return convention while the controller does not record fresh acceptance. |
 
-Failure mappings need operation context: for example `MALFORMED_RESPONSE` cannot
-be blindly treated as a repairable request; `RESOURCE_LIMIT` is OOM only when
-measured evidence establishes that; cancellation must stop admission. A rate
-limit does not authorize replay of an instance mutation or submission. Shared
-records currently lack all the evidence-confirmation and retry-guidance fields
-needed here. Jerome plus the affected owner must agree any additions.
+`failure_from_tool` maps shared timeout/authentication/configuration/rate-limit
+categories conservatively. The shared record has no configuration revision, so
+an authentication/configuration failure blocks the explicit `unreported` revision
+until the owner supplies a changed one. `MALFORMED_RESPONSE` is not assumed to be
+a repairable request, and `RESOURCE_LIMIT` is not assumed to mean OOM. Model
+exception classification can be injected by its trusted owner. By default,
+the foundation's `ConfigurationError` and HTTP 401/403 block the model subsystem's
+unreported revision; other unknown failures defer. A supplied documented rate limit uses the controller's existing
+retry schedule. The adapter does not sleep, retry HTTP internally or start a loop.
 
-Before changing this PR from draft to integration-complete:
+## Real-Brain execution adapter and activation
 
-1. Jerome confirms the inspected foundation head and chosen extension seam, and
-   the team agrees whether broad challenge ranking has a supported hook or remains
-   offline. Use his current interface rather than replace inherited iteration.
-2. Align the local records to the shared contract with explicit conversion tests.
-   Richard agrees evidence identities, wrong/uncertain outcomes, negative evidence,
-   checkpoint/restart semantics and `already_solved` behavior.
-3. Jerome/Aidan make actual model/tool calls honor remaining budgets and
-   cancellation, drain resources, and return accurate usage/failure reports.
-4. Trace the same fake lifecycle through the **real** Brain/shared adapters with
-   one intent ledger, submitter and official writer. Run the combined nonempty
-   offline suite. The draft fixture above is necessary evidence, not this gate.
-5. Jerome packages the agreed code, runs module-in-image smoke and structural
-   checks, and preserves a known-good baseline. No live or scored run follows
-   automatically from this development PR.
+`BrainAttempt` consumes one **already admitted** attempt and calls a subclass of
+the merged Brain exactly once. The subclass only adds admission checks around
+the existing model call; tool/candidate handling uses the existing constructor
+callbacks. `brain.py` itself and the shared records remain unchanged.
+
+The candidate callback raises a private control-flow exception before doing any
+network operation, returning execution to the controller. The controller records
+the handoff, Richard qualifies it, the owner reserves/checkpoints an intent, and
+only then is the supplied authorized submission callback invoked. There is at
+most one candidate handoff/submission per admitted attempt. A wrong result requires
+a new justified experiment; a second candidate in the same model message is not
+sent. This is a deliberate conservative baseline, within the shared submission
+budget, rather than reproducing Brain's up-to-three submissions inside one solve.
+
+The complete offline trace uses real Brain control flow with fake model/owner
+callbacks:
+
+```text
+shared qualified scope + shared remaining budget -> admitted attempt
+  -> Brain model turn -> admitted command -> shared ToolResult + confirmed evidence
+  -> Brain model turn -> capture Candidate -> controller candidate handoff
+  -> owner qualification -> reserve intent -> checkpoint intent
+  -> authorized callback once -> shared SubmissionResult -> controller outcome
+  -> close model session -> release resources -> checkpoint/projection
+```
+
+The evidence/ledger callbacks are described by the Elson-side `StrategyOwners`
+protocol. `observe`, `qualify`, `reserve_intent`, `record_submission`, `checkpoint`
+and `release` are mandatory; there is no permissive production fake. Test doubles
+are in `tests/test_strategy_bridge.py`. The adapter does not implement Richard's
+qualification or durable ledger and does not implement Aidan's process cleanup.
+
+An integration owner can execute an admitted decision as follows; the named
+inputs must come from the trusted harness, not parsed model/challenge prose:
+
+```python
+from agent_ext.strategy_bridge import BrainAttempt
+
+# controller has already qualified the shared scope and admitted decision.attempt.
+projection = BrainAttempt(
+    controller, decision.attempt, shared_scope, shared_remaining_budget, owners,
+    clock=monotonic_clock, cancelled=shutdown_requested,
+    classify_model_failure=classify_model_failure,
+).run(prompt, run_bash=trusted_run_bash, submit_flag=trusted_submit_flag)
+# Return projection to the inherited solver/writer. Do not write a competing JSON file.
+```
+
+Owner records must be persisted before the callback, including an intent that
+later becomes uncertain. If checkpointing fails, the callback is not invoked.
+Cancellation between intent checkpoint and send preserves the pending intent.
+An interrupt during submission marks it unresolved before propagating the
+interrupt. Release/checkpoint failures are reported with fixed codes rather than
+raw exception messages; a cleanup failure does not erase a definitive result.
+
+Deadlines and cancellation are **cooperative** around synchronous calls. A call
+already in flight cannot be interrupted by these guards. The inherited 180-second
+model timeout and 120-second tool timeout remain unchanged. Hard attempt deadlines
+still require bounded/cancellable owner callbacks; this adapter does not claim
+that a 30-second experiment can forcibly stop those existing calls.
+
+## Foundation review and remaining team gate
+
+The merged foundation's 18 tests pass, and its checked-in documentation reports
+image/arena execution. Review confirmed the one-challenge Brain seam and the single
+official writer. A local synthetic reproduction also demonstrated that the default
+Brain makes **two submission calls** when the first returns an unrecognized verdict
+and the next model turn offers another candidate. The new adapter makes one call
+and preserves uncertainty in that situation. Because activation is explicit, this
+does **not** claim to have patched the default unadapted Brain path.
+
+A separate setup issue is already addressed by Jerome's open
+[PR #3](https://github.com/jerome-queck/incypher/pull/3): the merged entrypoint
+unconditionally sources an existing Day-1 fallback file, which can overwrite
+organizer-injected Day-2 model variables. That PR changes precedence and has its
+own checks. It is not incorporated or merged by this strategy update; the captain
+should include the reviewed runtime fix in his Day-2 release decision.
+
+Shared-record conversion and the real-Brain fake lifecycle gates are now exercised
+by executable tests. Remaining work before live activation:
+
+1. Jerome binds trusted structured scope and budget at the supported seam. The
+   inherited constructor currently receives callbacks and a prompt, not a
+   `ChallengeScope`. Broad challenge ranking remains offline; do not add a second
+   challenge loop to manufacture that hook.
+2. Richard/Aidan supply the production `StrategyOwners` callbacks: confirmed
+   evidence, candidate qualification, durable unique intents/reconciliation,
+   checkpoint projection and actual cleanup. These modules were not present on
+   the reviewed `main`; no replacement implementation is fabricated in this PR.
+3. Jerome/Aidan agree/enforce hard runtime deadlines and cancellation for in-flight
+   model/tool calls. The bridge already blocks subsequent calls after a deadline
+   or cancellation and enforces model/tool counts before dispatch.
+4. Jerome runs the module-in-image smoke and structural checks for the exact
+   integrated image. Local Docker was unavailable. Preserve his known-good image;
+   no registry push, live test or scored run follows from this code update.
 
 ## Rollback
 
-Revert the strategy PR commit to remove these seven newly added files. It changes
-neither the baseline Dockerfile/entrypoint nor the current official image. The
+Revert the strategy feature commits to remove these nine newly added files,
+preserving Jerome's foundation. They change neither his Dockerfile/entrypoint nor
+the current official image. The
 optional selection policy is also reversible by choosing `COVERAGE` in a local
 experiment. Once a future integration wires the controller into Brain, that
 integration needs its own rollback alongside the captain's known-good image.

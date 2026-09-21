@@ -1,7 +1,7 @@
 """Serial decision owner for the inherited harness; no HTTP, model, or result I/O.
 
-All records in this module are provisional Elson-side integration records. Only
-trusted adapters may supply qualified metadata, confirmed evidence, or outcomes.
+Records here are private decision state. strategy_bridge projects the merged
+team contracts; only trusted owners supply qualified scope, evidence and outcomes.
 """
 
 from __future__ import annotations
@@ -247,6 +247,7 @@ class Controller:
         self._current: dict[str, Scope] = {}
         self._blocked_subsystems: dict[str, str] = {}
         self._active: Attempt | None = None
+        self._execution_token: int | None = None
         self._stop_reason: str | None = None
         self._idle_since: float | None = None
         self._serial = 0
@@ -480,6 +481,13 @@ class Controller:
                 refresh_catalogue=True,
             )
 
+    def claim_attempt(self, attempt: Attempt) -> None:
+        """Atomically bind an admitted lease to one executor until its completion report."""
+        with self._lock:
+            if self._active is not attempt or self._execution_token is not None:
+                raise ValueError("attempt is not available for execution")
+            self._execution_token = attempt.token
+
     def _observe(self, entry: _Entry, evidence: tuple[ProgressEvidence, ...]) -> bool:
         fresh = {
             item.fingerprint
@@ -510,6 +518,7 @@ class Controller:
             attempt = self._active
             entry = self._entries[attempt.scope]
             self._active = None
+            self._execution_token = None
             self._models += report.model_requests
             self._tools += report.tool_calls
             entry.state = WorkState.DEFERRED
@@ -786,6 +795,7 @@ class Controller:
             return {
                 "stop_reason": self._stop_reason,
                 "active_attempt_token": self._active.token if self._active else None,
+                "active_execution_token": self._execution_token,
                 "metrics": {
                     **self._metrics,
                     "decisions": self._decisions,

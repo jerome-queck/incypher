@@ -1,4 +1,4 @@
-"""Pure challenge ranking. These are draft Elson records, not organizer APIs."""
+"""Pure challenge ranking using private policy records, not organizer API types."""
 
 from __future__ import annotations
 
