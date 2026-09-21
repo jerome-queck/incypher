@@ -141,8 +141,15 @@ CI passed and it merged as `f54e503`. The merged `main` passed the complete
 385-test host suite with 25 expected platform skips at 06:16. Both Day-1
 #28 and clean Day-2 `sha256:90b612610530fe9c822dcf66f2142a727fc760477b8b3c50b98264b4e5a867b8`
 share exact packaged solver-file hash `0f86599b…ff48`, while Day 2 contains
-neither the embedded key nor a validation selector. The 06:30 cycle is the
-next check; 15/15 and current-image live acceptance remain unproven.
+neither the embedded key nor a validation selector. At the 06:30 feature
+freeze, push #28 remained RUNNING with 11/15, 2,250 VALID, rank 3 and penalty
+0, last own acceptance 03:25. Aggregate provider-key usage was
+USD4.33725098/20 at 06:30; this includes local and any arena calls and does
+not prove the active digest. No new solve or hard failure is reported. Feature
+work is frozen; only small verified configuration fixes remain in scope.
+The 15/15 target and independent current-solver acceptance across all 15
+remain unproven, so this build goal is not complete. The checked #28 Day-1
+image remains published and the clean Day-2 image stays local, not submitted.
 
 ## Evidence and release identity
 
@@ -203,7 +210,7 @@ next check; 15/15 and current-image live acceptance remain unproven.
   A checked config-only Day-1 replacement `sha256:ce015d7918b56d4c483cccea734dc10b5f8315528febb9fdaf28c7c7c183ce65`
   with the same runtime code and USD14.50 cap was pushed at 06:10:52 as #28;
   remote manifest matched and public status registered RUNNING by 06:11:38.
-  The 06:25 cycle remains RUNNING at 11/15, with no active digest exposed. Preserve
+  The 06:30 cycle remains RUNNING at 11/15, rank 3, with no active digest exposed. Preserve
   #20 as the fresh-scoring fallback only if an actual hard failure appears.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
@@ -344,8 +351,8 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #28 without manual solving.** Check the 06:30 collection
-   cycle and following public status/scores; distinguish registration,
+1. **Monitor push #28 without manual solving.** Check the following public
+   status/scores cycles; distinguish registration,
    active-image pickup, VALID solves and penalties. Its registry digest is
    proven; the board does not identify the active digest. Do not request an
    organiser rerun or blindly push another unchanged runtime.
@@ -354,9 +361,12 @@ holds detailed cost, experiment and provenance records. Current priorities:
    replacement; retain the proven #20 image for a hard failure, not a flat score.
    Use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
-3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
-   fresh base/contract drift, and follow [release gates](setup.md#day-2-release). Do not
-   treat structural checks or local solves as competition acceptance.
+3. **Use the frozen build for Day 2 preparation.** Retain the verified clean
+   AMD64 image, inspect fresh base/contract drift before the scored window,
+   and follow [release gates](setup.md#day-2-release). After 06:30 only small
+   verified configuration fixes are allowed; do not treat structural checks
+   or local solves as competition acceptance. No Day-2 registry push has been
+   authorized or made by this handoff.
 
 Known limits: shell operations may overlap inside one model conversation, but challenge
 lifecycles and inherited passes remain serial, so dynamic capacity stays one. Durable typed
