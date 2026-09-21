@@ -133,7 +133,16 @@ aggregate hash as #27, while the embedded cap is USD14.50. Checker 6/0/2,
 five intended config names and no validation selector passed. The status
 board registered #28 RUNNING by 06:11:38, still 11/15 and penalty 0. This
 is registration, not proof of active digest, new acceptance or a quality gain;
-the 06:15 cycle is the next collection check.
+the 06:15, 06:20 and 06:25 cycles also stayed RUNNING at 11/15, 2,250 VALID,
+rank 2 and penalty 0. The last own acceptance remains 03:25. Aggregate key
+usage was USD4.12029417/20 at 06:20, but cannot attribute the active digest.
+PR #29 corrected the setup's downward-cap wording and recorded this release;
+CI passed and it merged as `f54e503`. The merged `main` passed the complete
+385-test host suite with 25 expected platform skips at 06:16. Both Day-1
+#28 and clean Day-2 `sha256:90b612610530fe9c822dcf66f2142a727fc760477b8b3c50b98264b4e5a867b8`
+share exact packaged solver-file hash `0f86599b…ff48`, while Day 2 contains
+neither the embedded key nor a validation selector. The 06:30 cycle is the
+next check; 15/15 and current-image live acceptance remain unproven.
 
 ## Evidence and release identity
 
@@ -194,7 +203,7 @@ the 06:15 cycle is the next collection check.
   A checked config-only Day-1 replacement `sha256:ce015d7918b56d4c483cccea734dc10b5f8315528febb9fdaf28c7c7c183ce65`
   with the same runtime code and USD14.50 cap was pushed at 06:10:52 as #28;
   remote manifest matched and public status registered RUNNING by 06:11:38.
-  The latest VALID remains 11/15, with no active digest exposed. Preserve
+  The 06:25 cycle remains RUNNING at 11/15, with no active digest exposed. Preserve
   #20 as the fresh-scoring fallback only if an actual hard failure appears.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
@@ -335,7 +344,7 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #28 without manual solving.** Check the 06:15 collection
+1. **Monitor push #28 without manual solving.** Check the 06:30 collection
    cycle and following public status/scores; distinguish registration,
    active-image pickup, VALID solves and penalties. Its registry digest is
    proven; the board does not identify the active digest. Do not request an
