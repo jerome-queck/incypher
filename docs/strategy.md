@@ -82,7 +82,10 @@ fresh local ranking decision without overlapping dynamic lifecycles. The wrapper
 the inherited trusted catalogue at most every five minutes; intervening passes rerank a
 defensive cached copy, and accepted solves update only that cache until the next refresh.
 Temporary catalogue read failures retain the prior trusted snapshot for one full cadence;
-initial or malformed reads fail closed. It does not scrape a board or contact challenge
+initial or malformed reads fail closed. At the same cadence, a bounded three-second public
+read of the official score page extracts only its recent-event JSON and overlays exact-name
+solve counts as a weak queue hint. Missing, malformed, oversized or unavailable public data
+contributes no hint and never blocks the trusted catalogue. It does not contact challenge
 targets. There is no separate cumulative
 slice or call-count cutoff: durable model-dollar admission and a 24-hour process safety
 bound govern the run. The separate 6.5-hour pacing window is a soft spend target toward

@@ -13,6 +13,43 @@ from agent_ext.runtime_context import current_attempt
 
 
 class ArenaSelectionTests(unittest.TestCase):
+    def test_public_scoreboard_events_become_crowd_priority_at_refresh(self):
+        body = b'''<script id="ev" type="application/json">{
+            "recent": [
+                {"team": "a", "challenge": "easy", "value": 100},
+                {"team": "b", "challenge": "easy", "value": 100},
+                {"team": "c", "challenge": "hard", "value": 500}
+            ]}</script>'''
+        self.assertEqual(
+            arena_main._scoreboard_crowd_counts(body),
+            {"easy": 2, "hard": 1},
+        )
+
+        now = [0.0]
+        crowd_calls = []
+
+        class Delegate:
+            def list_challenges(self):
+                return [
+                    {"id": 1, "name": "hard", "points": 100},
+                    {"id": 2, "name": "easy", "points": 100},
+                ]
+
+        def crowd_source():
+            crowd_calls.append(1)
+            return arena_main._scoreboard_crowd_counts(body)
+
+        cache = arena_main._CatalogueCache(
+            clock=lambda: now[0], crowd_source=crowd_source
+        )
+        self.assertEqual(cache.list_challenges(Delegate())[1]["solves"], 2)
+        now[0] = 299.0
+        cache.list_challenges(Delegate())
+        self.assertEqual(len(crowd_calls), 1)
+        now[0] = 300.0
+        cache.list_challenges(Delegate())
+        self.assertEqual(len(crowd_calls), 2)
+
     def test_catalogue_cache_refreshes_at_five_minutes_and_returns_copies(self):
         now = [0.0]
 

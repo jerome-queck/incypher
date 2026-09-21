@@ -13,12 +13,12 @@ connections, credentials and candidate flags are not persisted.
 - For typed use, build a `ChallengeBrief` for each inherited trusted brief. Dynamic briefs require an
   instance-generation hash; static briefs reject one.
 - `RuntimeState.rank(briefs, now=...)` returns deterministic `RankedChallenge` values.
-  Ordering is unsolved, eligible, points plus a small crowd-popularity bonus, progress,
-  attempts, static/dynamic, age, then the unchanged numeric challenge ID. The adapter
+  Ordering is unsolved, eligible, fewest attempts, crowd popularity, progress, lowest
+  points, static/dynamic, age, then the unchanged numeric challenge ID. The adapter
   accepts only nonnegative exact-integer catalogue `solves` or `solve_count`; absent or
   malformed values contribute zero. Each solve adds 20 ranking points, capped after five
-  solves (+100), so challenge points remain material while popular/easier work can move
-  ahead of a repeatedly wasted hard attempt. This mutable hint does not enter material or
+  solves (+100). Attempt rounds prevent monopolization; recent public solves and low points
+  favor likely easy work within a round. This mutable hint does not enter material or
   evidence scope hashes. Failed slices receive finite 1s then 2s backoff. Production
   refresh/cache policy is authoritative in [strategy.md](strategy.md).
 - Build `brief.scope` once a challenge is admitted. `checkpoint_outcome()` atomically

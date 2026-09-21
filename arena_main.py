@@ -7,10 +7,13 @@ import ast
 import hashlib
 import importlib
 import inspect
+import json
 import math
 import os
+import re
 import textwrap
 import time
+import urllib.request
 from collections.abc import Mapping
 
 from agent_ext.managed_shell import ManagedShell, RESOURCE_STATUSES, parse_shell_projection
@@ -51,6 +54,11 @@ _MAX_RUN_SECONDS = 24 * 60 * 60
 _PASS_COOLDOWN_SECONDS = 2.0
 _PASS_RECOVERY_SECONDS = 30.0
 _CATALOGUE_REFRESH_SECONDS = 300.0
+_SCOREBOARD_URL = "https://hackathonlive.in-cypher.com/scores"
+_SCOREBOARD_MAX_BYTES = 256 * 1024
+_SCOREBOARD_EVENT_RE = re.compile(
+    rb'<script[^>]*\bid=["\']ev["\'][^>]*>(.*?)</script\s*>', re.DOTALL
+)
 
 
 def _require_signature(function, names, label):
@@ -93,11 +101,47 @@ class _RankedId(int):
         return int.__lt__(self, other)
 
 
+def _scoreboard_crowd_counts(body: bytes) -> dict[str, int]:
+    if not isinstance(body, bytes) or len(body) > _SCOREBOARD_MAX_BYTES:
+        raise ValueError("scoreboard response exceeded its bound")
+    match = _SCOREBOARD_EVENT_RE.search(body)
+    if match is None:
+        raise ValueError("scoreboard event feed is unavailable")
+    payload = json.loads(match.group(1))
+    recent = payload.get("recent") if isinstance(payload, Mapping) else None
+    if not isinstance(recent, list) or len(recent) > 128:
+        raise ValueError("scoreboard event feed changed")
+    counts: dict[str, int] = {}
+    for event in recent:
+        if not isinstance(event, Mapping):
+            continue
+        challenge = event.get("challenge")
+        if not isinstance(challenge, str) or not 1 <= len(challenge) <= 200:
+            continue
+        key = challenge.casefold()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _public_scoreboard_crowd_counts() -> dict[str, int]:
+    request = urllib.request.Request(
+        _SCOREBOARD_URL,
+        headers={"User-Agent": "InCypher-Team63-Agent/1"},
+    )
+    response = urllib.request.urlopen(request, timeout=3)
+    try:
+        body = response.read(_SCOREBOARD_MAX_BYTES + 1)
+    finally:
+        response.close()
+    return _scoreboard_crowd_counts(body)
+
+
 class _CatalogueCache:
     """Bound trusted catalogue reads while allowing local reranking every slice."""
 
-    def __init__(self, clock=None):
+    def __init__(self, clock=None, crowd_source=None):
         self._clock = clock or time.monotonic
+        self._crowd_source = crowd_source
         self._briefs: tuple[dict, ...] | None = None
         self._refresh_at = 0.0
 
@@ -117,7 +161,25 @@ class _CatalogueCache:
                 not isinstance(item, Mapping) for item in briefs
             ):
                 raise RuntimeError("Official challenge catalogue changed; inspect base contract")
-            self._briefs = tuple(dict(item) for item in briefs)
+            copied = [dict(item) for item in briefs]
+            if self._crowd_source is not None:
+                try:
+                    crowd_counts = self._crowd_source()
+                except (OSError, TimeoutError, ValueError):
+                    crowd_counts = {}
+                if isinstance(crowd_counts, Mapping):
+                    for brief in copied:
+                        name = brief.get("name")
+                        if not isinstance(name, str):
+                            continue
+                        observed = crowd_counts.get(name.casefold(), 0)
+                        if type(observed) is not int or observed <= 0:
+                            continue
+                        existing = brief.get("solves", 0)
+                        if type(existing) is not int or existing < 0:
+                            existing = 0
+                        brief["solves"] = max(existing, observed)
+            self._briefs = tuple(copied)
             self._refresh_at = now + _CATALOGUE_REFRESH_SECONDS
         return [dict(item) for item in self._briefs]
 
@@ -474,7 +536,7 @@ def main():
     validation_selector = os.path.isfile("/opt/agent/.validation-id")
     explicit_selector = validation_selector or bool(os.environ.get("ONLY_IDS", "").strip())
     coordinator = _OuterCoordinator()
-    catalogue = _CatalogueCache()
+    catalogue = _CatalogueCache(crowd_source=_public_scoreboard_crowd_counts)
 
     def client_factory(base, token):
         return _RankedClient(inherited_client(base, token), state, catalogue)
