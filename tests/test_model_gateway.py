@@ -239,6 +239,51 @@ class LedgerTests(unittest.TestCase):
             BudgetLedger(self.path, "20")
         self.assertEqual(BudgetLedger(self.path, "10").snapshot().unresolved_cost, Decimal("4"))
 
+    def test_restart_can_only_lower_limit_without_losing_spend_or_pacing_start(self):
+        self.ledger.reserve("held", "4")
+        self.ledger.reserve("done", "3")
+        self.ledger.settle("done", usage(Decimal("1"), CostProvenance.MEASURED))
+        started_at = self.ledger.snapshot().started_at
+        lower = BudgetLedger(self.path, "6")
+        snapshot = lower.snapshot()
+        self.assertEqual(snapshot.limit, Decimal("6"))
+        self.assertEqual(snapshot.started_at, started_at)
+        self.assertEqual(snapshot.measured_cost, Decimal("1"))
+        self.assertEqual(snapshot.unresolved_cost, Decimal("4"))
+        self.assertEqual(snapshot.available, Decimal("1"))
+        self.assertFalse(lower.reserve("too-expensive", "2").admitted)
+        self.assertTrue(lower.reserve("remaining", "1").admitted)
+        self.assertEqual(BudgetLedger(self.path, "4").snapshot().available, Decimal("0"))
+        self.assertFalse(BudgetLedger(self.path, "4").reserve("none", "0.05").admitted)
+        with self.assertRaisesRegex(ValueError, "budget limit differs"):
+            BudgetLedger(self.path, "6")
+
+    def test_existing_ledger_instance_respects_new_lower_durable_cap(self):
+        self.ledger.reserve("prior", "5")
+        BudgetLedger(self.path, "6")
+        self.assertEqual(self.ledger.snapshot().limit, Decimal("6"))
+        self.assertFalse(self.ledger.reserve("old-instance", "2").admitted)
+        self.assertTrue(self.ledger.reserve("remainder", "1").admitted)
+
+    def test_concurrent_lower_restarts_never_reopen_the_smaller_cap(self):
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def lower(cap):
+            barrier.wait()
+            try:
+                BudgetLedger(self.path, cap)
+            except ValueError as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=lower, args=(cap,)) for cap in ("8", "6")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertLessEqual(len(errors), 1)
+        self.assertEqual(self.ledger.snapshot().limit, Decimal("6"))
+
     def test_decimal_precision_exponent_and_serialized_length_are_bounded(self):
         invalid = (
             "0.12345678901234567890123456789",

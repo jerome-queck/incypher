@@ -95,6 +95,22 @@ names, with no validation selector. The clean Day-2 image has neither.
 It was pushed as #26 at 05:34:33; independent remote inspection matched the
 exact digest, and the board registered RUNNING at 05:35. Registration is not
 proof that the new digest was picked up or solved a challenge.
+A fresh local #26 Day-1 adaptive two-slice P2 run B40d passed with 11 real
+8,192/high calls, ten tools, one correct/zero wrong submission and USD0.00594319
+measured. Earlier short B40 guessed incorrectly before a later correct answer;
+B40b/c were consumed by private evaluator errors, not production failures.
+The public 05:40 cycle remains RUNNING at 11/15, 2,250 VALID and penalty 0.
+The provider's current-key aggregate usage at 05:35 was USD3.25536813/20;
+since #26 embeds a USD19 cap, a fresh ledger after replacement could otherwise
+outlast the remaining provider balance. A local unpushed follow-up now allows
+only downward durable budget-cap migration; its 385-test host suite (25
+expected skips), exact clean Day-2 restricted 379-test suite and both image
+checkers 6/0/2 pass. Clean Day-2
+`sha256:90b612610530fe9c822dcf66f2142a727fc760477b8b3c50b98264b4e5a867b8`
+has no secret/selector; matching Day-1
+`sha256:dcf1b0a74e962252af227067182bf2d12594dc614905bc4ae764d4696c2620a8`
+has only the five intended names and a USD15 cap. Review, merge and remote
+release still remain before replacing #26.
 
 ## Evidence and release identity
 
@@ -283,14 +299,14 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #25 without manual solving.** Read public status/scores through upcoming
+1. **Monitor push #26 without manual solving.** Read public status/scores through upcoming
    cycles; distinguish registration, active-image pickup, VALID solves and penalties.
    Its registry digest is proven; the board does not identify the active digest. Do not
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
-   controls active. Monitor checked push #26 for hard failures and fresh VALID,
-   then test a measurable capability improvement before another replacement;
-   use the [release rules](competition-rules.md#submission-and-runtime-requirements)
+   controls active. Finish review/CI for the checked USD15 successor before a
+   replacement; then test a measurable capability improvement for further images.
+   Use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
    fresh base/contract drift, and follow [release gates](setup.md#day-2-release). Do not
