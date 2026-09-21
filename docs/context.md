@@ -18,7 +18,7 @@ were merged. No open PR contained the requested general practice-selection chang
 | --- | --- | --- |
 | `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; live persistent serial queue | One bounded solve slice per inherited pass, then local rerank/requeue; five-minute catalogue/public-crowd refresh; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
-| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, packaged 24-call/runtime-overridable `MAX_STEPS` slice cap in the next local candidate, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
+| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, packaged 24-call/runtime-overridable `MAX_STEPS` slice cap, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
 | `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, Day-2 served-model discovery and durable conservative ledger; candidate requests high/medium reasoning only when discovered as supported and paces cumulative spend against a configurable window; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
@@ -70,8 +70,9 @@ passed checker 6/0/2 and 373 non-entrypoint tests in the restricted container;
 matching Day-1 image
 `sha256:679f517c3b9287afbf55cfb63f089b569844ef7e366e1b9623d1ffea62b16167`
 passed checker 6/0/2, carries only five intended model/budget keys and no
-selector. It remains unpushed pending review. This is scheduling plausibility,
-not evidence of another arena solve.
+selector. Independent Standards/Spec reviews and CI passed on PR #23 at
+`89dbe69`, merged as `de7c201`. The matching Day-1 image is push #25;
+this remains scheduling plausibility, not evidence of another arena solve.
 
 ## Evidence and release identity
 
@@ -107,6 +108,12 @@ not evidence of another arena solve.
   consistent with collection/replacement but does not identify an active digest.
   The 05:10 cycle still shows RUNNING, 11/15 and penalty 0, with no new own
   event or image identity.
+  PR #23 merged as `de7c201` after independent reviews and CI. The checked
+  Day-1 image `sha256:679f517c3b9287afbf55cfb63f089b569844ef7e366e1b9623d1ffea62b16167`
+  was pushed at 05:14:04; the remote registry `latest` independently matched
+  that digest. The board registered push #25, RUNNING at 11/15, 2,250 VALID,
+  penalty 0. The 05:15 cycle still showed RUNNING with no new own solve or
+  active-image identity. Do not infer pickup from push registration alone.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -246,7 +253,7 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #24 without manual solving.** Read public status/scores through upcoming
+1. **Monitor push #25 without manual solving.** Read public status/scores through upcoming
    cycles; distinguish registration, active-image pickup, VALID solves and penalties.
    Its registry digest is proven; the board does not identify the active digest. Do not
    request an organiser rerun or repeat an unchanged push.
