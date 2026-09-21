@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.token
+credentials*
+secrets*
+auth.json
+.codex/
+codex-home/
+state/
+goal-objective.md
+competition-requirements.md
