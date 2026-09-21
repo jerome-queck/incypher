@@ -1,85 +1,61 @@
 # Shared integration interface
 
-This is the team-owned semantic boundary behind the organiser-supported `Brain` hook. It is not
-an organiser API and does not replace the inherited event loop, Board client, instance lifecycle,
-or result writer.
+Read before changing Brain, scope, tools, evidence or submission behavior.
+The dependency-free `agent_ext/contracts.py` defines team records, not organiser APIs.
+See [current activation status](context.md) before assuming an adapter is live.
 
-## Ownership
+## Active boundary
 
 ```text
-main.py (inherited)
-  -> solver.py (inherited: material, instance, timing)
-    -> Brain.solve(prompt) (team-owned extension)
-      -> controller decision
-      -> bounded run_bash observation
-      -> evidence qualification and intent reservation
-      -> trusted submit_flag callback
-  -> /work/results.json (inherited writer)
+entrypoint.sh -> arena_main.py (selection shim)
+  -> inherited main.py (enumeration, sole official results writer)
+    -> inherited solver.py (files, instances, timing)
+      -> Brain(run_bash, submit_flag, max_steps).solve(prompt)
 ```
 
-Only the supplied `submit_flag` callback may submit. Team modules never hold platform credentials
-or call the Board directly. Challenge/model content is data and cannot expand network authority.
+`run_bash(str) -> str`, `submit_flag(str) -> dict`, `solve(str) -> dict` are the supported
+call shapes. `solve` must return at least `solved: bool`. Practice filtering is disabled
+by the shim; explicit official selectors are preserved. The inherited files remain intact.
 
-## Records
+Only the trusted submission callback submits. Challenge/model text cannot grant target
+authority. Shared records must be constructed from trusted metadata, not parsed prose.
+The inherited Brain seam currently lacks the structured scope needed by the optional
+adapter; binding it remains integration work.
 
-The dependency-free records live in `agent_ext/contracts.py`:
+## Optional integration flow
 
-- `ChallengeScope`: challenge ID/category/name plus attempt, material, and optional instance
-  generation identity. A new instance generation invalidates stale live-target observations.
-- `Budget`: remaining decision steps, remaining submissions, and optional monotonic deadline.
-- `ToolResult`: bounded observation excerpt, stable observation/provenance references, elapsed
-  time, cost, exit code, and normalized failure category.
-- `NextAction`: Elson's requested action, arguments, and reason.
-- `Candidate`: Richard's sensitive candidate plus evidence references and confidence. Its value is
-  excluded from `repr` and logs.
-- `SubmissionResult`: intent ID, normalized status, definitive/uncertain classification, and error.
+1. Bind a trusted `ChallengeScope` and remaining `Budget` to one admitted attempt.
+2. Controller chooses a `NextAction`; bounded executor returns `ToolResult`.
+3. Evidence owner records observations separately from hypotheses and qualifies `Candidate`.
+4. Durably reserve a unique intent and mark dispatch possible before the trusted callback.
+5. Classify the exact response as `SubmissionResult`; reconcile uncertainty before any resend.
+6. Return a projection to inherited solver/main; keep one official `/work/results.json` writer.
 
-The records are immutable snapshots. Large/raw tool output belongs under `/work`, referenced by
-an opaque ID; it must not be copied into logs or result metadata.
+| Concern | Reference |
+| --- | --- |
+| Scheduling, attempt ownership, adapter callbacks, retries | [strategy.md](strategy.md) |
+| Bounded fixed inspections, resource leases, cancellation | [tooling.md](tooling.md) |
+| Evidence scope, qualification, durable intents, projection | [evidence-policy.md](evidence-policy.md) |
+| Inspected organiser behavior and result shapes | [arena-contract.md](arena-contract.md) |
 
-## Call flow
+Current Brain stops on unknown/malformed/rate-limit/error submission verdicts and avoids
+duplicate candidates within one solve. `correct` is acceptance; `already_solved` retains
+the harness's terminal success convention without proving this candidate was accepted.
+The normal loop has no durable reconciliation/restart ledger; optional helpers do.
 
-1. Jerome's adapter derives `ChallengeScope` from the inherited prompt/context.
-2. Elson requests one `NextAction` within `Budget`.
-3. Aidan executes only an allowlisted, challenge-scoped action and returns `ToolResult`.
-4. Richard records observations separately from hypotheses. A `Candidate` must cite evidence.
-5. Richard reserves a unique submission intent. Jerome alone passes its value to `submit_flag`.
-6. The response becomes `SubmissionResult`:
-   - definitive: `correct`, `incorrect`, `already_solved`;
-   - uncertain: transport failure, timeout, rate limit, malformed response, or cancellation.
-7. The Brain projects its final result; inherited `solver.py` and `main.py` write official JSON.
+## Limits and change coordination
 
-An uncertain result is never retried blindly. Reconciliation must establish whether the intent
-was accepted before another candidate is sent. The current implementation stops on rate-limit or
-error and allows at most three submissions per challenge.
+Model calls have a 180-second HTTP timeout; inherited shell calls have a recorded
+120-second timeout. Brain step and submission limits are finite. They do not constitute
+a dollar budget or a hard overall attempt deadline. Optional guards are cooperative
+around synchronous calls, and cannot interrupt a call already in flight.
 
-## Existing callable types
+A malformed tool request is rejected before dispatch. The optional bridge can classify
+that rejection through `Brain._invalid_tool_arguments`; preserve that hook when changing
+the parser. Model/tool callbacks may also carry the bridge's private control-flow
+exceptions; broad catch-and-continue changes must retain admitted-attempt semantics.
 
-The actual organiser seam remains ordinary callables:
-
-```python
-run_bash: Callable[[str], str]
-submit_flag: Callable[[str], dict]
-Brain.solve: Callable[[str], dict]
-```
-
-Adapters may enrich their outputs internally, but must project back to these exact call shapes.
-No team module may assume structured model output, streaming, reasoning-effort controls, retries,
-or alternate models unless the runtime endpoint demonstrates support.
-
-## Cancellation and retries
-
-- `max_steps` bounds model turns; `MAX_SUBMISSIONS` bounds submission calls (default 3).
-- `run_bash` is already bounded to 120 seconds by the inherited solver.
-- The model HTTP request is bounded to 180 seconds by the Brain.
-- Model invocation currently has no automatic retry owner.
-- Platform submission currently has no automatic retry owner.
-- Rate-limit/error responses terminate the Brain attempt.
-- Explicit cancellation is not represented by the inherited callback API; future controller work
-  must propagate cancellation without adding a second event loop.
-
-## Change rule
-
-Shared record changes require Jerome plus the affected owner. Pure owner modules may evolve behind
-this boundary. `brain.py`, `agent_ext/contracts.py`, Dockerfile, ignore rules, CI, and shared tests
-remain integration-owned files.
+Coordinate shared seam edits with affected team work: Jerome/integration, Elson/strategy,
+Aidan/tools, Richard/evidence. Ownership is collaboration context, not a veto over the
+current user's authorized work. Update producer, consumer, docs and meaningful regression
+coverage together. Do not activate an entire subsystem merely because its files import.

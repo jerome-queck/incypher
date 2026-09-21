@@ -1,4 +1,8 @@
-# Arena contract and evidence
+# Arena contract and historical evidence
+
+This records an earlier inspected image. [Current context](context.md) owns current
+source/deployment status; [competition rules](competition-rules.md) records the live-site
+audit. These digests are historical and do not identify today's deployed `:latest`.
 
 Verified on 21 September 2026 from the authenticated organiser image and its files under
 `/opt/agent/`. This document distinguishes inspected behavior from local tests and arena
@@ -12,10 +16,11 @@ results. It contains no credentials, flags, or raw run output.
 - First submitted derived image: `sha256:aa19961428f1cf24a654ddb5ec89fab924c1bcbe77f7978654c31a42cb5ddbca`.
 - Arena-validated one-challenge release:
   `sha256:5083e3f7563ca307ffbaa072f643343ed706968dd54a683c315e4db4366c70fe`.
-- Current normal-selection release:
+- Historical normal-selection release:
   `sha256:75fc11358fc236c505026288dea5b3b2f0d2cf07e182a6a9f53db7dff28523e3`.
 - Platform/size: Linux AMD64, approximately 283 MB.
-- Start command: `/opt/agent/entrypoint.sh`, which normally execs inherited `main.py`.
+- Start command: `/opt/agent/entrypoint.sh`, which at the recorded baseline execs inherited `main.py`. Current source uses
+  `arena_main.py` to include practice challenges before delegating to inherited main.
 
 The base remains referenced by its required `:latest` tag. The digest above records what was
 actually tested; it is not a silent Dockerfile pin.
@@ -79,7 +84,8 @@ for platform credentials and the image is pushed only to the official team regis
 `VALIDATION_CHALLENGE_ID=94` enables a temporary, one-challenge proof mode. The entrypoint invokes
 `validation_main.py`, which sets the inherited `ONLY_IDS` selector and bypasses only the inherited
 practice-category filter. The official enumeration, solver, submission callback, and results writer
-remain unchanged. Omit the argument for normal arena behavior.
+remain unchanged. Omit the argument for normal arena behavior. Current normal selection also includes
+practice challenges; `validation_main.py` now shares the `arena_main.py` wrapper.
 
 ## Result shape
 
