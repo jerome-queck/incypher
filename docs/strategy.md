@@ -92,7 +92,9 @@ already-solved and conflicting outcomes block every replacement scope until the 
 confirms it solved. Contradictory definitive replay becomes conflict. At the
 same cadence, a bounded three-second public
 read of the official score page extracts only its recent-event JSON and overlays exact-name
-solve counts as a weak queue hint. Missing, malformed, oversized or unavailable public data
+solve counts as a weak queue hint. At most two local retries gain crowd priority over
+untried work; subsequent misses restore the ordinary attempt-order preference, and
+backoff/eligibility always take precedence. Missing, malformed, oversized or unavailable public data
 contributes no hint and never blocks the trusted catalogue. It does not contact challenge
 targets. There is no separate cumulative
 slice or call-count cutoff: durable model-dollar admission and a 24-hour process safety
