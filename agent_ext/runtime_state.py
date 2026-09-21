@@ -462,7 +462,7 @@ class RuntimeState:
                 attempts,
                 -min(brief.crowd_solves, _CROWD_SOLVE_COUNT_CAP),
                 -progress,
-                -brief.points,
+                brief.points,
                 brief.kind is ChallengeKind.DYNAMIC,
                 last_attempt,
                 brief.challenge_id,

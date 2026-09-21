@@ -239,14 +239,14 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertEqual([brief["id"] for brief in ordered], [3, 1, 2])
         self.assertIs(ordered[0], briefs[2])
 
-    def test_unsolved_high_value_work_cannot_monopolize_later_passes(self):
+    def test_easy_first_work_cannot_monopolize_later_passes(self):
         briefs = [
             {"id": 1, "points": 500, "type": "standard", "solves": 0},
             {"id": 2, "points": 100, "type": "standard", "solves": 0},
         ]
-        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 1)
-        self.store.record_challenge_outcome(1, False, 1, "unsolved", now=10)
-        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 2)
+        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 2)
+        self.store.record_challenge_outcome(2, False, 1, "unsolved", now=10)
+        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 1)
 
     def test_catalogue_crowd_solves_ignores_absent_or_malformed_values(self):
         briefs = [

@@ -351,8 +351,8 @@ class ArenaSelectionTests(unittest.TestCase):
         ):
             self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(detail_ids, [2, 3, 1])
-        self.assertEqual(delegated_ids, [2])
+        self.assertEqual(detail_ids, [3, 2, 1])
+        self.assertEqual(delegated_ids, [3])
         self.assertEqual(len(results), 3)
         self.assertIn("queue reschedule", results[1]["error"])
         self.assertEqual(results[-1]["model_calls"], 0)

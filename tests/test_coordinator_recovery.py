@@ -244,14 +244,14 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
                 self.assertEqual(events, [
-                    ("detail", 1), ("solve", 1),
                     ("detail", 2), ("solve", 2),
+                    ("detail", 1), ("solve", 1),
                 ])
                 self.assertEqual(returned[0]["error"], "RuntimeError: attempt crashed")
                 connection = sqlite3.connect(state_path)
                 try:
                     progress = connection.execute(
-                        "SELECT progress FROM challenge_state WHERE challenge_id = 1"
+                        "SELECT progress FROM challenge_state WHERE challenge_id = 2"
                     ).fetchone()[0]
                 finally:
                     connection.close()
