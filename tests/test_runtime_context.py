@@ -102,7 +102,7 @@ class RuntimeContextTests(unittest.TestCase):
             "Service is at 192.0.2.10",
             "Try localhost:31337",
             "Recovered 0123456789abcdef0123456789abcdef",
-            "Recovered QWERTYUIOPASDFGHJKLZXCVBNMQWERTY",
+            "Recovered ZQJTRPKMNVXHCBWLFDSAYUEG",
             "Recovered sk-abcdefghijklmnop",
             "key=synthetic-value",
             "Reuse the connection endpoint",

@@ -48,7 +48,7 @@ _FINDING_SECRET_VALUE = re.compile(
 )
 _FINDING_OPAQUE = re.compile(
     r"(?i)(?:\b[0-9a-f]{16,}\b|\beyJ[a-z0-9_-]{8,}(?:\.[a-z0-9_-]{8,}){1,2}\b|"
-    r"\b[a-z]{32,}\b|"
+    r"\b[a-z]{24,}\b|"
     r"\b(?=[a-z0-9_-]{24,}\b)(?=[a-z0-9_-]*[0-9_-])[a-z0-9_-]+\b|"
     r"\b[a-z0-9+/]{20,}={1,2})"
 )
