@@ -69,10 +69,12 @@ required by the override. `LLM_BASE_URL` may be either the API root or the compl
 become unsuccessful Brain results rather than empty success.
 
 Day 1 does not inject model values. The private release is built with the team env file mounted as
-a BuildKit secret and copied into a mode-0400 release layer; `entrypoint.sh` exports it only inside
-the process environment. The value is absent from Git, build arguments, Docker config metadata,
-and logs. `INCLUDE_DAY1_LLM=1` separates this cache path from ordinary/day-2 builds. The file is
-never used for platform credentials and the image is pushed only to the official team registry.
+a BuildKit secret and copied into a mode-0400 release layer. `entrypoint.sh` uses it only when all
+three `LLM_*` runtime variables are absent. A complete organiser-injected configuration wins; a
+partial runtime configuration is not mixed with fallback values and therefore fails explicitly in
+the Brain. The value is absent from Git, build arguments, Docker config metadata, and logs.
+`INCLUDE_DAY1_LLM=1` separates this cache path from ordinary/day-2 builds. The file is never used
+for platform credentials and the image is pushed only to the official team registry.
 
 `VALIDATION_CHALLENGE_ID=94` enables a temporary, one-challenge proof mode. The entrypoint invokes
 `validation_main.py`, which sets the inherited `ONLY_IDS` selector and bypasses only the inherited

@@ -4,7 +4,8 @@ Team 63's minimal extension of the official arena agent. The organiser's `main.p
 `ctfd.py`, and results writer remain inherited. This repository overrides `brain.py`, supplies a
 thin configuration entrypoint, and adds dependency-free internal contracts under `agent_ext/`.
 
-See [arena contract](docs/arena-contract.md) and [shared interfaces](docs/interfaces.md).
+See [arena contract](docs/arena-contract.md), [shared interfaces](docs/interfaces.md), and the
+[Day-2 readiness record](docs/day2-readiness.md).
 
 ## Offline tests
 
@@ -55,10 +56,12 @@ docker build --no-cache --platform linux/amd64 --provenance=false \
   -t incypher-agent:latest .
 ```
 
-The secret is copied only into that private release image and loaded into the process environment
-by `entrypoint.sh`; it is absent from Git, build arguments, Docker config metadata, and logs. Push
-that image only to the official team registry. Ordinary/day-2 builds omit both flags and contain no
-embedded model credential because the arena injects the runtime values.
+The secret is copied only into that private release image and used as a fallback when none of the
+three `LLM_*` runtime variables is present. A complete organiser-injected configuration always
+wins; a partial runtime configuration is never mixed with the fallback. The secret is absent from
+Git, build arguments, Docker config metadata, and logs. Push that image only to the official team
+registry. Ordinary/day-2 builds omit both flags and contain no embedded model credential because
+the arena injects the runtime values.
 
 For the day-1 platform proof only, force the official harness to attempt one authorised practice
 challenge that it would normally filter out:
