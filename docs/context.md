@@ -15,13 +15,14 @@ were merged. No open PR contained the requested general practice-selection chang
 
 | Path | Actual status | Consequence |
 | --- | --- | --- |
-| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; practice selection and trusted per-challenge context wrappers | Official selection (`ONLY_IDS`), solving, instance lifecycle and results remain inherited; signature drift fails closed |
+| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers | Official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
-| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, point-based call caps, tool/submission caps, 48 KiB context and deterministic category playbook; shell remains synchronous |
+| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, point-based call caps, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
 | `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, high reasoning when supported and durable conservative ledger; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
-| `resources.py`, `tools/` | Merged fixed local inspections | Not a bounded replacement for arbitrary shell; not invoked by normal Brain |
-| `memory.py`, `verification.py`, `submission_state.py`, `results.py` | Merged evidence/SQLite helpers | Production callbacks and official result mapping remain unconnected |
+| `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
+| `agent_ext/runtime_state.py` | Active bounded SQLite ranking/memory/checkpoint seam | Restart-safe finite backoff, scoped command dedupe and <=16 record/8 KiB projection; raw commands, output, flags and credentials are not stored |
+| `memory.py`, `verification.py`, `submission_state.py`, `results.py` | Earlier offline helpers remain unconnected | PR3 uses the smaller runtime-state seam; inherited result mapping remains authoritative |
 | `scripts/arena.py` | Local setup/build/check/practice/push utility | Explicit API-backed practice; Day-1 secret handling; clean Day-2 build path |
 
 Confirmed bugs corrected in this pass: normal practice exclusion; duplicate flag
@@ -29,10 +30,14 @@ submissions from tool calls or repeated assistant text; continuation after an un
 submission verdict; malformed model/tool argument shapes crashing or dispatching empty
 commands; explicit blank runtime config incorrectly loading the Day-1 fallback;
 raw provider exception text leaking into results. The optional bridge retains its bounded repair classification.
+PR3 additionally bounds arbitrary shell capture, reaps descendants, prevents same-scope
+exact-command replay, stops three quiet turns after one replan, limits one candidate per
+evidence turn, classifies tool/crash outcomes durably and skips trusted solved briefs
+outside explicit validation images.
 
 ## Evidence and release identity
 
-- Public boards at **21 Sep 21:49 SGT**: rank 8, VALID 650, SCORE 650, five solves;
+- Public boards at **21 Sep 23:30 SGT**: rank 10, VALID 650, SCORE 650, five solves;
   status 5/15, 12 pushes, last push 17:43:14, `done`, penalty 0. This is Day-1 evidence,
   not final competition score. Read `/scores` and `/status` again for current values.
 - Source docs previously called an older digest “current.” That is historical evidence
@@ -40,8 +45,9 @@ raw provider exception text leaking into results. The optional bridge retains it
 - [Arena contract](arena-contract.md) records an earlier inspected base/harness.
   Fresh registry manifest inspection in this pass returned authentication required;
   the official base is not cached on this machine. Current base drift remains unknown.
-- This pass creates a Git PR and merge, not a registry release. No practice challenge,
-  flag submission, paid API call or organiser restart was performed by this audit.
+- PR3 work remains a local candidate until independent review and merge. No practice
+  challenge, platform submission, registry release, dynamic instance or organiser restart
+  was performed. B5 made only a capped development-provider call to an in-process verifier.
 - `.venv` is installed locally. The ignored mode-0600 `.env` is populated on this machine
   with Team 63 platform configuration and the Day-1 provider triplet migrated from the
   prior private files. `doctor` reports every required field set, registry login succeeds,
@@ -73,11 +79,31 @@ raw provider exception text leaking into results. The optional bridge retains it
   Preregistered B4 on that exact image repeated the Luna/high fixture in 7.145s: two
   model calls, one tool, one correct in-process submission, USD 0.0002720 measured and
   zero unresolved. This evidence closes the fix-head pre-review checks, not CTF capability.
-- Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
-  Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
-  macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,
-  local doc links, PDF redactions and whitespace checks passed. Historical image tests
-  in [day2-readiness.md](day2-readiness.md) belong to their recorded source/digest.
+- Final PR2 review passed and PR #16 merged as `a0b182a`; merged source produced checked
+  AMD64 image `sha256:dee439a27b65ab2d260fcd711f3a7839ba2c1d180776ca5fba33ff2e3b3da9ce`
+  with 269 tests passing and 19 expected macOS skips.
+- PR3 candidate from base `a0b182a` passed 297 macOS tests with 25 expected platform
+  skips, compilation and whitespace checks. Exact AMD64 image
+  `sha256:d2e2b8eb476eac12df4fd0dab52cd62cb966070e5a287875bb1d2ffa107564ee`
+  is 284,017,157 bytes; checker 6/0/2 expected warnings, exact official AST guard,
+  imports and clean Day-2 config passed. Sixty-four focused tests passed inside that
+  image on Linux with ResourceWarnings promoted to errors, including six process tests.
+  B5 then solved one unseen hex-transformed local fixture through the real stateful shell
+  in 12.085s: three Luna/high calls, two tools, one correct in-process submission,
+  USD 0.0009127 measured and zero unresolved; scoped memory was 2 records/139 bytes.
+  This is synthetic capability/plumbing evidence, not practice or arena acceptance.
+- Initial independent PR3 review found missing `is_practice` drift validation, an
+  overbroad crash catch, duplicated shell-status policy, non-durable in-flight progress,
+  and missing integrated async/quiet acceptance coverage. A Standards re-review then
+  identified the client-constructor AST seam and duplicated state upsert. CI then exposed
+  host-global `RLIMIT_NPROC` behavior under a busy non-root runner; the shared 64-PID
+  admission budget remains while that ineffective arena-root limit is omitted. Final
+  runtime head `c36b22f` resolves all findings and passes 300 macOS tests with 25 expected
+  platform skips. Exact AMD64 image
+  `sha256:9381bb113e12df5224455f9b905426c88ef039803bb8e8aaa2dca49da7820052`
+  is 284,031,687 bytes; checker 6/0/2 expected warnings, all eight official AST guards,
+  imports and clean Day-2 config passed. Sixty-seven focused Linux tests passed as a
+  non-root user with ResourceWarnings fatal. Independent re-review remains required.
 
 ## Next work, in order
 
@@ -87,35 +113,34 @@ The brief owns this session's goals, deadlines, delegation and Day-1 release aut
 its research records the audited starting gaps. Private progress lives under ignored
 `private/solver-build-20260921/`. Architecture and PR ordering remain build-session
 decisions. The prompt-authoring pass changed documentation only; solver readiness is
-unchanged. A 21 Sep ~21:29 SGT public-board refresh still showed 5/15, VALID/SCORE 650,
+unchanged. A 21 Sep 23:30 SGT public-board refresh still showed 5/15, VALID/SCORE 650,
 12 pushes, `done`, penalty 0. No paid request or arena release was made by that pass.
 
-The ordered technical gates below remain the starting baseline; the build session
-may resequence them using the brief and measured evidence.
+The ordered technical gates below are current after PR3 implementation.
 
-1. **Validate the integrated model path.** The exact-image non-submitting Luna/high
-   fixture passes. Next use held-out local fixtures and one readiness-gated fresh-material
-   practice validation; confirm inherited cleanup/results behavior before release.
-2. **Prove solving.** Use one explicitly selected practice challenge via `scripts/arena.py`
+1. **Review and merge PR3.** Freeze the checked source head/spec; resolve independent
+   Standards and Spec findings, merge, then prove the merged runtime tree matches or
+   rebuild/check it while retaining `dee439a…` as rollback.
+2. **Prove solving.** Use harder held-out fixtures, then one readiness-gated explicitly
+   selected practice challenge via `scripts/arena.py`
    or local Codex practice. Record accepted outcome, elapsed time and model/tool usage
    privately; report sanitized counts. Local/manual solves do not prove arena VALID.
-3. **Close the remaining production integration gap.** Use the trusted structured scope handoff;
-   wire one attempt through real tools, evidence qualification, durable intents and
-   inherited result output. Done when success, wrong candidate, ambiguous submission,
-   timeout, cancellation and instance cleanup pass end-to-end with real adapters.
-4. **Measure before optimizing.** Compare identical practice tasks and budgets for baseline
+3. **Measure before optimizing.** Compare identical practice tasks and budgets for baseline
    versus a change. Prioritize valid points per cost/time, coverage and recovery. Static
    parallelism is permitted but unimplemented; dynamic capacity is globally one.
+4. **Readiness-gated Day-1 release and evidence collection.** Require fresh production-path
+   evidence for the remaining tasks, then publish the authorized private-key image early
+   enough to observe hands-off results and preserve rollback.
 5. **Prepare the clean Day-2 image.** Follow [release gates](setup.md#day-2-release).
    Read runtime-injected model configuration; neither a Sol/Astra pin nor a local
    subscription is a substitute. Record the pushed digest and board outcome separately.
 
-Known limits to investigate: shell execution is synchronous and output is captured before
-the 12,000-character model excerpt; normal Brain has no persistent work queue, durable
-progress memory, resource scheduler, transient model retry or quiet-stall watchdog.
-Restart-safe cost reservations exist, but restart-safe challenge dedupe/recovery does not.
-Day-2 request compatibility remains provider-dependent. Broad callback exception and
-cancellation behavior remains the inherited harness's responsibility.
+Known limits: PR3 overlaps at most two shell operations inside one model conversation; it
+does not parallelize challenge lifecycles or add a second dynamic lease. Durable summaries
+are deliberately sparse and quality is not yet measured on real CTF work. Backoff affects
+later catalogue runs, not same-process retries; transient catalogue/model retries remain
+terminal to avoid duplicate paid or submission effects. Day-2 request compatibility remains
+provider-dependent. Broad callback and dynamic cleanup behavior remains inherited.
 
 ## Context management
 

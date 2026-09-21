@@ -39,7 +39,42 @@ class FailingBrain(brain.Brain):
         raise TimeoutError("synthetic timeout")
 
 
+class SupervisedShell:
+    supports_async = True
+
+    def __init__(self):
+        self.calls = []
+        self.closed = False
+
+    def __call__(self, command):
+        self.calls.append(("run", command))
+        return "sync"
+
+    def start(self, command):
+        self.calls.append(("start", command))
+        return "job-synthetic"
+
+    def poll(self, handle, wait_seconds=0):
+        self.calls.append(("poll", handle, wait_seconds))
+        return "async evidence"
+
+    def cancel(self, handle):
+        self.calls.append(("cancel", handle))
+        return "cancelled"
+
+    def close(self):
+        self.closed = True
+
+
 class BrainTests(unittest.TestCase):
+    def test_prompt_clipping_preserves_scope_head_and_connection_tail(self):
+        prompt = "HEAD-SCOPE\n" + ("x" * 30000) + "\nTAIL-CONNECTION"
+        clipped = brain._clip_prompt(prompt, 24000)
+        self.assertLessEqual(len(clipped.encode()), 24000)
+        self.assertIn("HEAD-SCOPE", clipped)
+        self.assertIn("TAIL-CONNECTION", clipped)
+        self.assertIn("[middle truncated]", clipped)
+
     def test_trusted_points_bound_model_steps(self):
         challenge = {
             "id": 1, "name": "small", "category": "crypto", "type": "standard",
@@ -233,6 +268,33 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(commands, ["inspect synthetic material"])
         self.assertEqual(submitted, [candidate])
 
+    def test_supervised_async_tools_dispatch_and_cleanup(self):
+        shell = SupervisedShell()
+        replies = [
+            {"content": "", "tool_calls": [{"id": "1", "function": {
+                "name": "start_bash", "arguments": json.dumps({"command": "inspect"}),
+            }}]},
+            {"content": "", "tool_calls": [{"id": "2", "function": {
+                "name": "poll_bash", "arguments": json.dumps({
+                    "handle": "job-synthetic", "wait_seconds": 1,
+                }),
+            }}]},
+            {"content": "done"},
+        ]
+        agent = ScriptedBrain(replies, run_bash=shell, submit_flag=Mock(), verbose=False)
+
+        result = agent.solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["tool_calls"], 2)
+        self.assertEqual(shell.calls, [
+            ("start", "inspect"), ("poll", "job-synthetic", 1),
+        ])
+        self.assertTrue(shell.closed)
+        self.assertEqual({tool["function"]["name"] for tool in agent._tools}, {
+            "run_bash", "submit_flag", "start_bash", "poll_bash", "cancel_bash",
+        })
+
     def test_reasoning_details_round_trip_unchanged_after_tool_call(self):
         details = [{"type": "reasoning.summary", "id": "synthetic", "data": "opaque"}]
         replies = [
@@ -319,6 +381,29 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(result["error"], "submission budget exhausted")
         self.assertEqual(len(submitted), 3)
 
+    def test_one_submission_per_assistant_evidence_turn(self):
+        candidates = ["INCYPHER" + "{first}", "INCYPHER" + "{second}"]
+        replies = [
+            {"content": "", "tool_calls": [
+                {"id": str(index), "function": {
+                    "name": "submit_flag", "arguments": json.dumps({"flag": candidate}),
+                }} for index, candidate in enumerate(candidates)
+            ]},
+            {"content": "stop"},
+        ]
+        submitted = []
+        agent = ScriptedBrain(
+            replies,
+            run_bash=Mock(),
+            submit_flag=lambda flag: submitted.append(flag) or {"status": "incorrect"},
+            verbose=False,
+        )
+
+        result = agent.solve("sample")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(submitted, [candidates[0]])
+
     def test_tool_call_budget_is_terminal(self):
         replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
             "name": "run_bash", "arguments": json.dumps({"command": f"echo {index}"})
@@ -330,6 +415,68 @@ class BrainTests(unittest.TestCase):
         result = agent.solve("sample")
         self.assertEqual(result["error"], "tool call budget exhausted")
         self.assertEqual(agent.run_bash.call_count, 1)
+
+    def test_quiet_stall_replans_once_then_stops_without_extra_model_call(self):
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": "same"})
+        }}]} for index in range(3)]
+        agent = CapturingBrain(
+            replies,
+            run_bash=Mock(return_value="duplicate:no new evidence"),
+            submit_flag=Mock(),
+            max_steps=6,
+            verbose=False,
+        )
+
+        result = agent.solve("sample")
+
+        self.assertEqual(result["error"], "quiet stall: no new tool evidence")
+        self.assertEqual(result["model_calls"], 0)
+        self.assertEqual(agent.run_bash.call_count, 3)
+        notices = [message for message in agent.requests[2]
+                   if "Replan once" in str(message.get("content", ""))]
+        self.assertEqual(len(notices), 1)
+
+    def test_quiet_stall_counts_assistant_turns_not_parallel_tool_calls(self):
+        first_calls = [{"id": str(index), "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": f"same-{index}"})
+        }} for index in range(3)]
+        replies = [
+            {"content": "", "tool_calls": first_calls},
+            {"content": "", "tool_calls": [first_calls[0]]},
+            {"content": "", "tool_calls": [first_calls[1]]},
+        ]
+        agent = ScriptedBrain(
+            replies,
+            run_bash=Mock(return_value="duplicate:no new evidence"),
+            submit_flag=Mock(),
+            max_steps=6,
+            verbose=False,
+        )
+
+        result = agent.solve("sample")
+
+        self.assertEqual(result["error"], "quiet stall: no new tool evidence")
+        self.assertEqual(agent.run_bash.call_count, 5)
+
+    def test_status_only_tool_failures_trigger_quiet_stall(self):
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": f"slow-{index}"})
+        }}]} for index in range(4)]
+        agent = ScriptedBrain(
+            replies,
+            run_bash=Mock(return_value=(
+                "[shell status=timeout exit=-9 elapsed=45.000s truncated=false]"
+            )),
+            submit_flag=Mock(),
+            max_steps=4,
+            verbose=False,
+        )
+
+        result = agent.solve("sample")
+
+        self.assertEqual(result["error"], "quiet stall: no new tool evidence")
+        self.assertEqual(agent.run_bash.call_count, 3)
 
     def test_rate_limit_is_terminal_and_not_retried(self):
         candidate = "INCYPHER" + "{rate-limit-test}"

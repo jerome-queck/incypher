@@ -1,16 +1,17 @@
 # Bounded observations and resources
 
-Read for `agent_ext/tools/` or admission changes. Merged through PR #9; the normal Brain
-still invokes the inherited shell callback. Aidan's fixed inspection workers are separate
-from that backend. [Context](context.md) owns activation status;
+Read for `agent_ext/tools/`, `agent_ext/managed_shell.py` or admission changes. The normal
+Brain still invokes the inherited shell callback shape, now replaced at the inspected seam
+by `ManagedShell`. Aidan's fixed inspection workers remain separate from that backend.
+[Context](context.md) owns activation status;
 [interfaces](interfaces.md) owns shared contracts.
 
 ## Tool contract
 
 Operations: `identify`, `text`, `hex`, `strings`, `zip_list`. They inspect local material;
 no generic scripts, executable selection, target connection, extraction or decompression.
-Use the official backend separately for shell/network work. Trimming inherited shell
-output after it returns cannot bound its earlier capture or establish descendant reaping.
+Use the managed compatible backend separately for shell/network work. It keeps the official
+`/bin/bash -lc` behavior while bounding capture during execution and reaping descendants.
 
 An executor binds trusted scope and one authorized material root. Models provide only
 relative path, operation and offset. Root authority comes from trusted harness metadata;
@@ -34,6 +35,26 @@ excessive declared expansion. ZIP64, split and prefixed archives are unsupported
 Read current numeric limits from `Limits` in `tools/inspection.py`.
 
 ## Execution and resource contract
+
+### Compatible managed shell
+
+`ManagedShell` is the active arbitrary-command backend. It uses one shared `Admission`
+pool (2 active, 1 heavy, 512 MiB/64 PID estimates, queue 8), a credential-free allowlisted
+environment, one process group, `prlimit` defense in depth, streamed combined output capped
+at 12 KB and 45s/90s deadlines bounded by the trusted attempt. It offers synchronous call
+compatibility plus at most two opaque current-attempt handles. Polls wait at most five
+seconds; Brain closes the supervisor on every exit, cancelling and reaping remaining jobs.
+These estimates do not replace aggregate arena cgroups, and root `RLIMIT_NPROC` is not
+claimed as hard PID isolation. The shell therefore uses the shared PID admission budget
+instead of host-global `RLIMIT_NPROC`, which counts unrelated same-UID processes on
+non-root shared runners.
+
+The coordinator fingerprints raw commands/output in memory, stores only sanitized status
+summaries, and rejects an exact same-scope replay. Static evidence requires the same material
+hash; dynamic evidence also requires the same instance-generation hash. See
+[runtime-state.md](runtime-state.md).
+
+### Fixed inspections
 
 Workers use isolated Python, a minimal environment excluding credentials/startup hooks,
 read-only regular-file access through descriptor-relative `O_NOFOLLOW`, resource limits

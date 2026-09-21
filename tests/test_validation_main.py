@@ -26,10 +26,23 @@ class ValidationIdTests(unittest.TestCase):
     def test_delegates_to_official_main_with_one_selected_id(self):
         called = []
         official_main = ModuleType("main")
-        official_main.is_practice = lambda challenge: True
+        official_main.is_practice = lambda ch: True
         official_main.main = lambda: called.append(True) or 0
         solver = ModuleType("validation_solver")
         solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
+        solver.run_bash = lambda cmd: "synthetic"
+
+        class Client:
+            def __init__(self, base, token):
+                self.base, self.token = base, token
+
+            def list_challenges(self):
+                return []
+
+            def challenge(self, cid):
+                return {"id": cid}
+
+        official_main.CTFdClient = Client
 
         def solve_challenge(client, ch, max_steps):
             return {"solved": False}
@@ -38,13 +51,16 @@ class ValidationIdTests(unittest.TestCase):
         official_main.solve_challenge = solve_challenge
 
         with (
+            tempfile.TemporaryDirectory() as directory,
             patch("validation_main.validation_id", return_value=94),
             patch.dict(sys.modules, {"main": official_main, "validation_solver": solver}),
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", {
+                "RUNTIME_STATE_PATH": str(Path(directory) / "state.sqlite3"),
+            }, clear=True),
         ):
             result = validation_main.main()
 
             self.assertEqual(result, 0)
             self.assertEqual(validation_main.os.environ["ONLY_IDS"], "94")
-            self.assertFalse(official_main.is_practice({"category": "(Practice)"}))
+            self.assertTrue(official_main.is_practice({"category": "(Practice)"}))
             self.assertEqual(called, [True])
