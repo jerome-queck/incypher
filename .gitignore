@@ -19,3 +19,9 @@ __pycache__/
 output/
 results.json
 work/
+.coverage
+.pytest_cache/
+htmlcov/
+*.log
+private/
+extracted/

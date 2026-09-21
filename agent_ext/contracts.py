@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -63,7 +64,7 @@ class ToolResult:
 @dataclass(frozen=True)
 class NextAction:
     kind: str
-    arguments: dict[str, Any]
+    arguments: Mapping[str, Any]
     reason: str
 
 

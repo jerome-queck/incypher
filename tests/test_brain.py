@@ -48,11 +48,11 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(submitted, [candidate])
 
     def test_submission_budget_is_terminal(self):
-        candidate = "INCYPHER" + "{budget-test}"
-        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
-            "name": "submit_flag", "arguments": json.dumps({"flag": candidate + str(index)})}}]}
-                   for index in range(1, 5)]
         submitted = []
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "submit_flag",
+            "arguments": json.dumps({"flag": "candidate-%d" % index})}}]}
+                   for index in range(1, 5)]
         agent = ScriptedBrain(
             replies,
             run_bash=lambda command: "unused",
