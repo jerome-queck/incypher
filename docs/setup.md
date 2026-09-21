@@ -27,10 +27,11 @@ values override the file. `doctor` reports presence only, not validity or secret
 
 The helper reads `.env` locally; Docker does not automatically read it. `practice`
 passes only allowlisted runtime names, including the budget controls above. A budget
-ledger stores its initial dollar ceiling and rejects later reuse with a different ceiling;
-use a fresh work directory for a newly budgeted run. The solver does not query provider
-balance automatically. Local `practice` forces fixed-high reasoning while retaining the
-configured `LLM_MODEL`. `build --phase day2` passes no model secret; its image default is
+ledger preserves calls and start time across restarts. A lower ceiling may be applied
+to an existing ledger, but raising it is rejected; use a fresh work directory for a
+separate newly budgeted run. The solver does not query provider balance automatically.
+Local `practice` forces fixed-high reasoning while retaining the configured `LLM_MODEL`.
+`build --phase day2` passes no model secret; its image default is
 used only when the organiser supplies endpoint/key without a model.
 Day-1 builds may include the bounded model-budget policy values above alongside the model
 triplet; platform credentials are never copied.

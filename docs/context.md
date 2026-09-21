@@ -102,8 +102,8 @@ B40b/c were consumed by private evaluator errors, not production failures.
 The published #27 image passed a new fresh local three-lane B41 battery:
 crypto 4/3, network 12/12, reversing 12/11 model/tool calls, each with one
 correct/zero wrong submission and zero unresolved spend; aggregate USD0.02392435.
-Neither local battery proves the four remaining live solves. The public 05:55
-cycle remains RUNNING at 11/15, 2,250 VALID and penalty 0.
+Neither local battery proves the four remaining live solves. The public 06:10
+cycle remained RUNNING at 11/15, 2,250 VALID and penalty 0 before push #28.
 The provider's current-key aggregate usage at 05:48 was USD3.47254776/20;
 since #26 embedded a USD19 cap, a fresh ledger after replacement could otherwise
 outlast the remaining provider balance. PR #27 now allows only downward durable
@@ -119,7 +119,21 @@ and PR #27 merged as `01cf968`.
 The Day-1 image was pushed at 05:51:38 as #27; the remote digest independently
 matched and the board registered RUNNING with no active digest or new VALID
 proof. The clean Day-2 image remains local. The ignored local `.env` numeric
-budget was also lowered to USD15; no credential value changed.
+budget was lowered to USD15, then USD14.50 for the controlled config-only
+replacement below; no credential value changed. At the 06:10 cycle, #27 was
+still RUNNING at 11/15, 2,250 VALID, rank 2 and penalty 0, with the last own
+acceptance at 03:25. The provider key's aggregate usage increased from
+USD3.66412488 at 05:59 to USD3.85974909 at 06:10 of its USD20 tryout
+limit; this cannot attribute which digest made the calls. The user-requested
+Day-1 relaunch #28 was pushed at 06:10:52 after two flat cycles. Its exact
+AMD64 digest
+`sha256:ce015d7918b56d4c483cccea734dc10b5f8315528febb9fdaf28c7c7c183ce65`
+independently matched registry `latest`; packaged runtime files have the same
+aggregate hash as #27, while the embedded cap is USD14.50. Checker 6/0/2,
+five intended config names and no validation selector passed. The status
+board registered #28 RUNNING by 06:11:38, still 11/15 and penalty 0. This
+is registration, not proof of active digest, new acceptance or a quality gain;
+the 06:15 cycle is the next collection check.
 
 ## Evidence and release identity
 
@@ -177,6 +191,11 @@ budget was also lowered to USD15; no credential value changed.
   remain unexposed. At the 05:55 cycle scores briefly showed COLLECTING while
   status showed RUNNING, then both reported RUNNING by 05:55:25 with no new
   VALID event or hard failure. This transient alone does not justify rollback.
+  A checked config-only Day-1 replacement `sha256:ce015d7918b56d4c483cccea734dc10b5f8315528febb9fdaf28c7c7c183ce65`
+  with the same runtime code and USD14.50 cap was pushed at 06:10:52 as #28;
+  remote manifest matched and public status registered RUNNING by 06:11:38.
+  The latest VALID remains 11/15, with no active digest exposed. Preserve
+  #20 as the fresh-scoring fallback only if an actual hard failure appears.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -316,13 +335,14 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #27 without manual solving.** Read public status/scores through upcoming
-   cycles; distinguish registration, active-image pickup, VALID solves and penalties.
-   Its registry digest is proven; the board does not identify the active digest. Do not
-   request an organiser rerun or repeat an unchanged push.
+1. **Monitor push #28 without manual solving.** Check the 06:15 collection
+   cycle and following public status/scores; distinguish registration,
+   active-image pickup, VALID solves and penalties. Its registry digest is
+   proven; the board does not identify the active digest. Do not request an
+   organiser rerun or blindly push another unchanged runtime.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
    controls active. Test a measurable capability improvement before any further
-   replacement; retain the proven #20 image if a hard regression is observed.
+   replacement; retain the proven #20 image for a hard failure, not a flat score.
    Use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect
