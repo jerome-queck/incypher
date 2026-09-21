@@ -1,7 +1,9 @@
 import contextlib
 import io
 import json
+import os
 import unittest
+from unittest.mock import Mock, patch
 
 import brain
 
@@ -127,6 +129,23 @@ class BrainTests(unittest.TestCase):
         self.assertFalse(result["solved"])
         self.assertEqual(result["steps"], 1)
         self.assertIn("TimeoutError", result["error"])
+
+    def test_partial_model_configuration_fails_before_network_or_submission(self):
+        submitted = []
+        agent = brain.Brain(
+            run_bash=lambda command: "unused",
+            submit_flag=lambda flag: submitted.append(flag) or {"status": "correct"},
+            verbose=False,
+        )
+        agent.s.post = Mock(side_effect=AssertionError("network must not be called"))
+
+        with patch.dict(os.environ, {"LLM_MODEL": "runtime-model"}, clear=True):
+            result = agent.solve("sample")
+
+        self.assertFalse(result["solved"])
+        self.assertIn("ConfigurationError", result["error"])
+        agent.s.post.assert_not_called()
+        self.assertEqual(submitted, [])
 
     def test_malformed_tool_arguments_do_not_crash_loop(self):
         commands = []
