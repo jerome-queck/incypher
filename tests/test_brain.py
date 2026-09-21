@@ -16,6 +16,34 @@ class ScriptedBrain(brain.Brain):
 
 
 class BrainTests(unittest.TestCase):
+    def test_full_lifecycle_runs_command_then_submits(self):
+        candidate = "INCYPHER" + "{synthetic-lifecycle}"
+        replies = [
+            {"content": "", "tool_calls": [{"id": "inspect", "function": {
+                "name": "run_bash",
+                "arguments": json.dumps({"command": "inspect synthetic material"}),
+            }}]},
+            {"content": "", "tool_calls": [{"id": "submit", "function": {
+                "name": "submit_flag",
+                "arguments": json.dumps({"flag": candidate}),
+            }}]},
+        ]
+        commands = []
+        submitted = []
+        agent = ScriptedBrain(
+            replies,
+            run_bash=lambda command: commands.append(command) or "synthetic evidence",
+            submit_flag=lambda flag: submitted.append(flag) or {"status": "correct"},
+            verbose=False,
+        )
+
+        result = agent.solve("synthetic challenge")
+
+        self.assertTrue(result["solved"])
+        self.assertEqual(result["steps"], 2)
+        self.assertEqual(commands, ["inspect synthetic material"])
+        self.assertEqual(submitted, [candidate])
+
     def test_submits_flag_returned_as_text(self):
         candidate = "INCYPHER" + "{unit-test-only}"
         submitted = []
