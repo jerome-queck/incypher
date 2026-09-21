@@ -1,8 +1,8 @@
 # IN-CYPHER agent
 
 Team 63's minimal extension of the official arena agent. The organiser's `main.py`, `solver.py`,
-`ctfd.py`, entrypoint, and results writer remain inherited. This repository overrides only
-`brain.py` and adds dependency-free internal contracts under `agent_ext/`.
+`ctfd.py`, and results writer remain inherited. This repository overrides `brain.py`, supplies a
+thin configuration entrypoint, and adds dependency-free internal contracts under `agent_ext/`.
 
 See [arena contract](docs/arena-contract.md) and [shared interfaces](docs/interfaces.md).
 

@@ -12,6 +12,8 @@ results. It contains no credentials, flags, or raw run output.
 - First submitted derived image: `sha256:aa19961428f1cf24a654ddb5ec89fab924c1bcbe77f7978654c31a42cb5ddbca`.
 - Current one-challenge validation release:
   `sha256:5083e3f7563ca307ffbaa072f643343ed706968dd54a683c315e4db4366c70fe`.
+- Locally checked normal-selection rollback candidate:
+  `sha256:75fc11358fc236c505026288dea5b3b2f0d2cf07e182a6a9f53db7dff28523e3`.
 - Platform/size: Linux AMD64, approximately 283 MB.
 - Start command: `/opt/agent/entrypoint.sh`, which normally execs inherited `main.py`.
 
@@ -123,8 +125,10 @@ writer is authoritative; extensions must not create a competing writer.
 1. **Local unit tests** use synthetic callbacks only; no model or Board.
 2. **Local image build/smoke** proves the override and package are present.
 3. **Structural checker** proves AMD64/startup/sandbox behavior, not solving.
-4. **Token-backed retry** proved autonomous commands and real submission calls on an
-   already-solved practice challenge. It is not fresh acceptance evidence.
+4. **Exact-image token-backed run** exercised the validation release under the arena's CPU,
+   memory, PID, capability, and read-only-root limits. The official harness reported 1/1 solved,
+   three steps in 8.6 seconds, a real `already_solved` submission verdict, and valid final results.
+   This is submission-path evidence, not fresh acceptance evidence.
 5. **Arena validation image** is queued for the next cycle. An `already_solved` result proves that
    the arena executed the complete model-to-submission path; only a new `status: correct` would
    additionally prove fresh acceptance.
