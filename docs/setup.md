@@ -19,8 +19,8 @@ values override the file. `doctor` reports presence only, not validity or secret
 | `LLM_BASE_URL` | Own provider's OpenAI-compatible base or full `/chat/completions` URL |
 | `LLM_MODEL` | Provider-supported tool-calling model for local API practice/Day 1 |
 | `LLM_API_KEY` | Provider API key; never a Codex login/access token |
-| `MAX_STEPS` | Model calls per challenge slice, integer 1–150; packaged default 16 |
-| `MAX_TOOL_CALLS`, `MAX_SUBMISSIONS` | Local per-slice tool/submission bounds; packaged defaults 20/3 |
+| `MAX_STEPS` | Model calls per challenge slice, integer 1–150; packaged default 24 |
+| `MAX_TOOL_CALLS`, `MAX_SUBMISSIONS` | Local per-slice tool/submission bounds; packaged defaults 28/3 |
 | `MODEL_BUDGET_USD` | Durable run admission ceiling, USD 0.05–85; set from known remaining allowance |
 | `MODEL_CALL_RESERVE_USD` | Per-call reserve when pricing is opaque, USD 0.05–5 |
 | `MODEL_BUDGET_WINDOW_SECONDS` | Arena spend-pacing window; default 23,400 seconds (6.5 hours) |

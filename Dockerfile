@@ -8,8 +8,8 @@ COPY arena_main.py /opt/agent/arena_main.py
 
 # Keep each challenge slice bounded so the persistent queue reaches all work.
 # The arena may still override these ordinary runtime controls.
-ENV MAX_STEPS=16 \
-    MAX_TOOL_CALLS=20 \
+ENV MAX_STEPS=24 \
+    MAX_TOOL_CALLS=28 \
     MAX_SUBMISSIONS=3 \
     ARENA_DEFAULT_LLM_MODEL=openai/gpt-5.6-luna
 
