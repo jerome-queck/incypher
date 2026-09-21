@@ -137,7 +137,9 @@ Complete before the user-confirmed 22 Sep 10:00 SGT start:
 
 Commands are in [README](../README.md#practice-and-submission). `push` does not build or
 run the checker for you. Release authorization is separate from ordinary Git work;
-this docs pass authorizes PR/merge, not an arena submission.
+a Git merge alone does not authorize an arena submission. Use the current session's
+explicit release scope; the [overnight build brief](solver-build/brief.md) requests a
+readiness-gated Day-1 release and preparation of a separate clean Day-2 image.
 
 ## Troubleshooting
 
