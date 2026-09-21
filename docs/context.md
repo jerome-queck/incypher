@@ -16,10 +16,10 @@ were merged. No open PR contained the requested general practice-selection chang
 
 | Path | Actual status | Consequence |
 | --- | --- | --- |
-| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; persistent serial queue candidate under review | One bounded solve slice per inherited pass, then local rerank/requeue; five-minute trusted catalogue refresh; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
+| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; live persistent serial queue | One bounded solve slice per inherited pass, then local rerank/requeue; five-minute catalogue/public-crowd refresh; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
 | `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, packaged 12-call/runtime-overridable `MAX_STEPS` slice cap, remaining-budget notices, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
-| `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery and durable conservative ledger; candidate requests high/medium reasoning only when discovered as supported and paces cumulative spend against a configurable window; opaque pricing remains unknown |
+| `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, Day-2 served-model discovery and durable conservative ledger; candidate requests high/medium reasoning only when discovered as supported and paces cumulative spend against a configurable window; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
 | `agent_ext/runtime_state.py` | Active bounded SQLite seam; PR4 typed-findings candidate under review | Restart-safe backoff, scoped command/finding dedupe and <=16 record/8 KiB projection; raw commands, output, flags and credentials are not stored |
@@ -37,12 +37,24 @@ evidence turn, classifies tool/crash outcomes durably and skips trusted solved b
 outside explicit validation images.
 PR4 adds strict typed safe findings and serial same-run revisits governed by
 [strategy.md](strategy.md). The release runtime passed fresh RSA/network/reversing at 3/3.
-The current candidate removes arbitrary cumulative slice/call abandonment, retains the
-per-slice inherited `MAX_STEPS` and dollar governor, polls trusted solve counts at five-minute
-cadence, and adds durable adaptive spend pacing. A Day-1 release is queued while this newer
-candidate continues through review/merge.
+The deployed runtime removes arbitrary cumulative slice/call abandonment, retains the
+per-slice inherited `MAX_STEPS` and dollar governor, and adds durable adaptive spend pacing.
+Newer local source adds bounded five-minute public crowd signals and Day-2 model discovery;
+it is checked locally but not pushed over the progressing live run.
 
 ## Evidence and release identity
+
+- Day-1 push #20, source `3a3452e`, remote digest
+  `sha256:44065c5107ddcbc132932e32563b04c7d10bf60cb07116c2b4ec9e3b2fd0166e`,
+  began scoring at 03:10 SGT and remains `running`. By 03:19 it earned nine fresh
+  arena-origin solves / 1,650 VALID points, rank 2, penalty 0. This is fresh live proof of
+  persistent solving and queue rotation. The board now explicitly charges 100 points for
+  every re-upload after the first scored run begins, so the working run is not replaced.
+- Local successor head `20285a7` passes 358 portable tests with 25 expected skips.
+  Clean AMD64 Day-2 image
+  `sha256:be04f8f418c34197e23e5fef017e374f73ed1100f182ea816b16f5bb06ba3b1d`
+  is 284,041,157 bytes, passes checker 6/0/2, contains no Day-1 secret/selector, and
+  supplies a discoverable image model policy for the organizer's two injected variables.
 
 - Public board reset at **22 Sep 02:00 SGT** from 7/15 to 0/15. Push #13 used a clean
   Day-2 image during Day 1 and finished 0/15. At 02:14:37 both corrective Day-1 pushes
