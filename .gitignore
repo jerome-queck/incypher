@@ -1,6 +1,8 @@
 .DS_Store
 .env
 .env.*
+day1-llm.env
+.day1-llm.env
 *.key
 *.pem
 *.p12

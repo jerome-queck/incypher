@@ -45,6 +45,21 @@ flags, raw traces, or runtime results in this repository.
 The container may write only to `/work` and `/tmp`. The Brain reads model configuration at runtime;
 no credentials are baked into source or image metadata.
 
+On day 1, the arena does not inject model variables. Build the private release image with the
+team-owned env file as a BuildKit secret. The non-secret build selector isolates its cache layer:
+
+```sh
+docker build --no-cache --platform linux/amd64 --provenance=false \
+  --build-arg INCLUDE_DAY1_LLM=1 \
+  --secret id=day1_llm,src=/path/to/day1-llm.env \
+  -t incypher-agent:latest .
+```
+
+The secret is copied only into that private release image and loaded into the process environment
+by `entrypoint.sh`; it is absent from Git, build arguments, Docker config metadata, and logs. Push
+that image only to the official team registry. Ordinary/day-2 builds omit both flags and contain no
+embedded model credential because the arena injects the runtime values.
+
 ## Submit
 
 ```sh

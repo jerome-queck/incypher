@@ -10,6 +10,7 @@ results. It contains no credentials, flags, or raw run output.
 - Organiser base: `registry.in-cypher.com:5001/base/agent-base:latest` at
   `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
 - First submitted derived image: `sha256:aa19961428f1cf24a654ddb5ec89fab924c1bcbe77f7978654c31a42cb5ddbca`.
+- Current private day-1 release: `sha256:1f3fb5403a884d1466efaff8fee902e62caa22948f03d94f07da86a936aca997`.
 - Platform/size: Linux AMD64, approximately 283 MB.
 - Inherited start command: `python /opt/agent/main.py`.
 
@@ -63,6 +64,12 @@ Model values are read at runtime: `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`
 required by the override. `LLM_BASE_URL` may be either the API root or the complete
 `/chat/completions` URL. Missing configuration, HTTP errors, timeouts, and malformed responses
 become unsuccessful Brain results rather than empty success.
+
+Day 1 does not inject model values. The private release is built with the team env file mounted as
+a BuildKit secret and copied into a mode-0400 release layer; `entrypoint.sh` exports it only inside
+the process environment. The value is absent from Git, build arguments, Docker config metadata,
+and logs. `INCLUDE_DAY1_LLM=1` separates this cache path from ordinary/day-2 builds. The file is
+never used for platform credentials and the image is pushed only to the official team registry.
 
 ## Result shape
 

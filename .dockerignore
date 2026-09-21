@@ -1,5 +1,6 @@
 *
 !Dockerfile
 !brain.py
+!entrypoint.sh
 !agent_ext/
 !agent_ext/**
