@@ -248,6 +248,20 @@ class RuntimeStateTests(unittest.TestCase):
         self.store.record_challenge_outcome(2, False, 1, "unsolved", now=10)
         self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 1)
 
+    def test_crowd_hint_offsets_at_most_two_retries_without_starving_new_work(self):
+        briefs = [
+            ChallengeBrief(1, 100, ChallengeKind.STATIC, "m1", crowd_solves=2),
+            ChallengeBrief(2, 100, ChallengeKind.STATIC, "m2"),
+        ]
+        self.store.checkpoint_outcome(briefs[0].scope, AttemptOutcome.UNSOLVED, now=10)
+        self.assertEqual(self.store.rank(briefs, now=10.1)[0].brief.challenge_id, 2)
+        ranked = self.store.rank(briefs, now=100)
+        self.assertEqual([item.brief.challenge_id for item in ranked], [1, 2])
+        self.store.checkpoint_outcome(briefs[0].scope, AttemptOutcome.UNSOLVED, now=101)
+        self.store.checkpoint_outcome(briefs[0].scope, AttemptOutcome.UNSOLVED, now=102)
+        ranked = self.store.rank(briefs, now=1000)
+        self.assertEqual([item.brief.challenge_id for item in ranked], [2, 1])
+
     def test_catalogue_crowd_solves_ignores_absent_or_malformed_values(self):
         briefs = [
             {"id": 1, "points": 100, "type": "standard", "solves": True},

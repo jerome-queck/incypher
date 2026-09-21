@@ -51,11 +51,27 @@ evidence. Clean AMD64 Day-2 image
 passed checker 6/0/2, 369 non-entrypoint tests inside the non-root read-only
 2CPU/2GiB/256PID sandbox with ResourceWarnings fatal, and the 375-test host suite
 with 25 expected platform skips; it has no Day-1 credential/validation selector
-and is not the registry image. A new, unpushed local Brain candidate reserves its
+and is not the registry image. PR #22 merged the Brain change that reserves its
 final model turn for submission or typed checkpoint when a finding callback exists.
 One short fresh diagnostic saved a finding and another did not; full-slice B33
-passed a fresh reversing case in 10/10 model/tool calls. This is local continuity
-and regression evidence, not a cause proven for the live scoring plateau.
+passed a fresh reversing case in 10/10 model/tool calls and B34 passed network
+in 8/7. This is local continuity and regression evidence, not a cause proven
+for the live scoring plateau. Checked Day-2 image
+`sha256:2b90cabdd64a5f649cee3af2ec8c32c1555c2dc420da245aa921cbcfe67c808b`
+passes checker 6/0/2, the full 378-test host suite with 25 expected platform
+skips, and 372 restricted-container non-entrypoint tests;
+the matching Day-1 image is push #24.
+The next local candidate gives a public crowd solve signal at most two bounded
+retry credits in the queue, preserving eligibility/backoff and returning to
+ordinary attempt order after further misses. Its 379-test host suite passed
+with 25 expected skips. Exact AMD64 clean Day-2 image
+`sha256:780596b2464f889915d9307c4c606424d3ccee1ae0376bfdf7cbe378ec376b21`
+passed checker 6/0/2 and 373 non-entrypoint tests in the restricted container;
+matching Day-1 image
+`sha256:679f517c3b9287afbf55cfb63f089b569844ef7e366e1b9623d1ffea62b16167`
+passed checker 6/0/2, carries only five intended model/budget keys and no
+selector. It remains unpushed pending review. This is scheduling plausibility,
+not evidence of another arena solve.
 
 ## Evidence and release identity
 
@@ -82,6 +98,15 @@ and regression evidence, not a cause proven for the live scoring plateau.
   At 04:55 the board registered push #23 and remained RUNNING, 11/15,
   2,250 VALID, rank 2, penalty 0, last own solve 03:25. Pickup still cannot be
   tied to an image from that aggregate view.
+  PR #22 merged as `eb86d76`; checked Day-1 image
+  `sha256:c684e40cf15c6f986733b18811cfecc3959adf792e84615d235e8fbe0f8c5137`
+  was pushed at 05:02:19 and independently matched remote `latest`.
+  At 05:03 the board registered push #24, remained RUNNING and still showed
+  11/15, 2,250 VALID and penalty 0. During the 05:05 cycle it briefly showed
+  COLLECTING, then RUNNING again by 05:05:29 with unchanged score. This is
+  consistent with collection/replacement but does not identify an active digest.
+  The 05:10 cycle still shows RUNNING, 11/15 and penalty 0, with no new own
+  event or image identity.
 - Local successor runtime `35de762` passes 375 host tests with 25 expected macOS skips;
   both exact-head source/spec and standards reviews pass. It separately persists
   account-terminal submission state and candidate verdicts across restarts and dynamic
@@ -221,13 +246,13 @@ The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and c
 Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
 holds detailed cost, experiment and provenance records. Current priorities:
 
-1. **Monitor push #23 without manual solving.** Read public status/scores through upcoming
+1. **Monitor push #24 without manual solving.** Read public status/scores through upcoming
    cycles; distinguish registration, active-image pickup, VALID solves and penalties.
    Its registry digest is proven; the board does not identify the active digest. Do not
    request an organiser rerun or repeat an unchanged push.
 2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
-   controls active. Evaluate the final-turn checkpoint candidate on fresh scoped work,
-   review it before release, and make a new image only after a bounded capability change;
+   controls active. Evaluate new generic capabilities on fresh scoped work and make a
+   replacement image only after a bounded measured change;
    use the [release rules](competition-rules.md#submission-and-runtime-requirements)
    for penalty and pickup uncertainty. Preserve negative local held-out results.
 3. **Freeze and prepare Day 2 by 06:30.** Retain the verified clean AMD64 image, inspect

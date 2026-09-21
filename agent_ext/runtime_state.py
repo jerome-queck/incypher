@@ -38,6 +38,7 @@ MAX_TOTAL_OBSERVATIONS = 4096
 _MAX_CHALLENGES = 4096
 _MAX_SUBMISSION_INTENTS = 4096
 _CROWD_SOLVE_COUNT_CAP = 5
+_CROWD_RETRY_CREDIT_CAP = 2
 _SUBMISSION_RECONCILE_SECONDS = 300.0
 _HASH_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _SECRET_PATTERNS = (
@@ -521,8 +522,9 @@ class RuntimeState:
             item_key = (
                 solved,
                 not eligible,
-                attempts,
+                max(0, attempts - min(brief.crowd_solves, _CROWD_RETRY_CREDIT_CAP)),
                 -min(brief.crowd_solves, _CROWD_SOLVE_COUNT_CAP),
+                attempts,
                 -progress,
                 brief.points,
                 brief.kind is ChallengeKind.DYNAMIC,
