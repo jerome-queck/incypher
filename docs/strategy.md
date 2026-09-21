@@ -74,8 +74,12 @@ preserves uncertainty. Cleanup failure does not erase a definitive outcome.
 
 Deadlines are cooperative around synchronous callbacks; a 30-second budget cannot
 force-stop a 180-second HTTP request. Production hard limits need cancellable/bounded
-callbacks and a tested cleanup path. Broad multi-challenge ranking needs an authorized
-selection seam, not a second uncontrolled loop around inherited main.
+callbacks and a tested cleanup path. The active wrapper uses the exact guarded inherited
+main as its authorized selection seam: serial passes, at most four slices per challenge,
+60 slices and 150 model calls per run, six hours total, and a two-second cooldown. Another
+pass requires an accepted solve, useful new shell evidence, or saved typed finding;
+provider/submission uncertainty is terminal. The inherited main remains the sole
+lifecycle, submission and results owner.
 
 ## Verification and integration gate
 

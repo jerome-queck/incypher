@@ -1,6 +1,6 @@
 # Repository context
 
-Updated 21 September 2026. Read this first on a new task, after compaction, or before
+Updated 22 September 2026. Read this first on a new task, after compaction, or before
 assigning a bounded subtask. Rules live in [competition-rules.md](competition-rules.md);
 machine commands live in [setup.md](setup.md).
 
@@ -15,13 +15,13 @@ were merged. No open PR contained the requested general practice-selection chang
 
 | Path | Actual status | Consequence |
 | --- | --- | --- |
-| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers | Official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
+| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; trusted ranking/context/state/shell wrappers; PR4 multipass candidate under review | Serial inherited passes only; official filtering, challenge lifecycle, submissions and result writing remain inherited; exact inspected AST/signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
 | `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, point-based call caps, one candidate per evidence turn, 48 KiB context, category playbooks, bounded sync/async shell tools and quiet-stall stop |
 | `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, high reasoning when supported and durable conservative ledger; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `agent_ext/managed_shell.py`, `resources.py` | Active shared admission and process supervision | Two active/one heavy; streamed 12 KB output, 45s/90s deadlines, process-group cleanup and credential-free environment; estimates are defense in depth inside the arena sandbox |
-| `agent_ext/runtime_state.py` | Active bounded SQLite ranking/memory/checkpoint seam | Restart-safe finite backoff, scoped command dedupe and <=16 record/8 KiB projection; raw commands, output, flags and credentials are not stored |
+| `agent_ext/runtime_state.py` | Active bounded SQLite seam; PR4 typed-findings candidate under review | Restart-safe backoff, scoped command/finding dedupe and <=16 record/8 KiB projection; raw commands, output, flags and credentials are not stored |
 | `memory.py`, `verification.py`, `submission_state.py`, `results.py` | Earlier offline helpers remain unconnected | PR3 uses the smaller runtime-state seam; inherited result mapping remains authoritative |
 | `scripts/arena.py` | Local setup/build/check/practice/push utility | Explicit API-backed practice; Day-1 secret handling; clean Day-2 build path |
 
@@ -34,6 +34,10 @@ PR3 additionally bounds arbitrary shell capture, reaps descendants, prevents sam
 exact-command replay, stops three quiet turns after one replan, limits one candidate per
 evidence turn, classifies tool/crash outcomes durably and skips trusted solved briefs
 outside explicit validation images.
+PR4 candidate adds strict typed safe findings and bounded serial same-run revisits: four
+slices per challenge, 60 slices, 150 model calls, six hours, two-second cooldown, and global
+stop on provider/submission uncertainty. Reset-set practice remains parked until review,
+exact-image checks and all three fresh held-out lanes pass.
 
 ## Evidence and release identity
 
@@ -45,9 +49,12 @@ outside explicit validation images.
 - [Arena contract](arena-contract.md) records an earlier inspected base/harness.
   Fresh registry manifest inspection in this pass returned authentication required;
   the official base is not cached on this machine. Current base drift remains unknown.
-- PR3 work remains a local candidate until independent review and merge. No practice
-  challenge, platform submission, registry release, dynamic instance or organiser restart
-  was performed. B5 made only a capped development-provider call to an in-process verifier.
+- PR3 merged through PR #17 as `8b86f1c`; exact merged AMD64 image
+  `sha256:60ba38f971224119de9b16a23cb50af76ad046bc53506dbf3ce35dc2003b2c83`
+  passed 300 tests/25 skips, checker 6/0/2, eight AST guards and 67 focused Linux tests.
+  B7 solved a fresh exact-image fixture for USD 0.00173741 but used four calls against its
+  preregistered three-call cap, so capability remained red. No reset-set practice challenge,
+  platform submission, registry release, dynamic instance or organiser restart occurred.
 - `.venv` is installed locally. The ignored mode-0600 `.env` is populated on this machine
   with Team 63 platform configuration and the Day-1 provider triplet migrated from the
   prior private files. `doctor` reports every required field set, registry login succeeds,
@@ -103,7 +110,8 @@ outside explicit validation images.
   `sha256:9381bb113e12df5224455f9b905426c88ef039803bb8e8aaa2dca49da7820052`
   is 284,031,687 bytes; checker 6/0/2 expected warnings, all eight official AST guards,
   imports and clean Day-2 config passed. Sixty-seven focused Linux tests passed as a
-  non-root user with ResourceWarnings fatal. Independent re-review remains required.
+  non-root user with ResourceWarnings fatal. Final Standards/Spec re-reviews passed and
+  PR #17 CI passed twice before merge.
 
 ## Next work, in order
 
@@ -116,13 +124,13 @@ decisions. The prompt-authoring pass changed documentation only; solver readines
 unchanged. A 21 Sep 23:30 SGT public-board refresh still showed 5/15, VALID/SCORE 650,
 12 pushes, `done`, penalty 0. No paid request or arena release was made by that pass.
 
-The ordered technical gates below are current after PR3 implementation.
+The ordered technical gates below are current after PR3 merge and PR4 implementation.
 
-1. **Review and merge PR3.** Freeze the checked source head/spec; resolve independent
-   Standards and Spec findings, merge, then prove the merged runtime tree matches or
-   rebuild/check it while retaining `dee439a…` as rollback.
-2. **Prove solving.** Use harder held-out fixtures, then one readiness-gated explicitly
-   selected practice challenge via `scripts/arena.py`
+1. **Review and merge PR4.** Freeze safe-findings/multipass source; require independent
+   Standards and Spec pass, exact AMD64 structural/Linux checks and merged-tree rebuild.
+2. **Prove solving.** Pass fresh RSA, framed-network and stripped-ELF held-out fixtures,
+   then use the CLI for the reset practice set only after the capability gate is green.
+   Start with one readiness-gated explicitly selected challenge via `scripts/arena.py`
    or local Codex practice. Record accepted outcome, elapsed time and model/tool usage
    privately; report sanitized counts. Local/manual solves do not prove arena VALID.
 3. **Measure before optimizing.** Compare identical practice tasks and budgets for baseline
@@ -135,12 +143,11 @@ The ordered technical gates below are current after PR3 implementation.
    Read runtime-injected model configuration; neither a Sol/Astra pin nor a local
    subscription is a substitute. Record the pushed digest and board outcome separately.
 
-Known limits: PR3 overlaps at most two shell operations inside one model conversation; it
-does not parallelize challenge lifecycles or add a second dynamic lease. Durable summaries
-are deliberately sparse and quality is not yet measured on real CTF work. Backoff affects
-later catalogue runs, not same-process retries; transient catalogue/model retries remain
-terminal to avoid duplicate paid or submission effects. Day-2 request compatibility remains
-provider-dependent. Broad callback and dynamic cleanup behavior remains inherited.
+Known limits: shell operations may overlap inside one model conversation, but challenge
+lifecycles and inherited passes remain serial, so dynamic capacity stays one. Durable typed
+findings are deliberately conservative and not yet measured on real CTF work. Provider and
+submission uncertainty remain terminal to avoid duplicate paid or submission effects.
+Day-2 request compatibility remains provider-dependent; dynamic cleanup remains inherited.
 
 ## Context management
 

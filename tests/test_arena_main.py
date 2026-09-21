@@ -334,3 +334,57 @@ class ArenaSelectionTests(unittest.TestCase):
         self.assertIs(official.solve_challenge, solve_challenge)
         self.assertIs(solver.build_prompt, original_builder)
         self.assertIs(solver.run_bash, original_shell)
+
+    def test_empty_and_all_solved_catalogues_run_official_main_once(self):
+        for challenges, expected_solves in (([], 0), ([{
+            "id": 1, "name": "solved", "category": "misc", "type": "standard",
+            "points": 100, "solved": True, "files": [],
+        }], 0)):
+            with self.subTest(challenges=bool(challenges)):
+                official = ModuleType("main")
+                solver = ModuleType("terminal_catalogue_solver")
+                solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
+                solver.run_bash = lambda cmd: "unused"
+                solves = []
+
+                def solve_challenge(client, ch, max_steps):
+                    solves.append(ch["id"])
+                    return {"solved": True, "model_calls": 1, "tool_calls": 0}
+
+                solve_challenge.__module__ = "terminal_catalogue_solver"
+                official.solve_challenge = solve_challenge
+                official.is_practice = lambda ch: False
+
+                class Client:
+                    def __init__(self, base, token):
+                        pass
+
+                    def list_challenges(self):
+                        return challenges
+
+                    def challenge(self, cid):
+                        return dict(challenges[0])
+
+                official.CTFdClient = Client
+                main_calls = []
+
+                def inherited_main():
+                    main_calls.append(1)
+                    client = official.CTFdClient("base", "token")
+                    for brief in client.list_challenges():
+                        official.solve_challenge(client, client.challenge(brief["id"]), 4)
+                    return 0
+
+                official.main = inherited_main
+                with tempfile.TemporaryDirectory() as directory, patch.dict(
+                    sys.modules, {
+                        "main": official,
+                        "terminal_catalogue_solver": solver,
+                    }
+                ), patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+                }, clear=True):
+                    self.assertEqual(arena_main.main(), 0)
+
+                self.assertEqual(main_calls, [1])
+                self.assertEqual(len(solves), expected_solves)

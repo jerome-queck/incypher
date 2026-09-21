@@ -13,6 +13,7 @@ import brain
 import agent_ext.runtime_context as runtime_context
 from agent_ext.provider_discovery import DiscoveryResult
 from agent_ext.runtime_context import trusted_attempt
+from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
 
 class ScriptedBrain(brain.Brain):
@@ -64,6 +65,19 @@ class SupervisedShell:
 
     def close(self):
         self.closed = True
+
+
+class FindingShell:
+    def __init__(self, disposition=FindingDisposition.SAVED):
+        self.disposition = disposition
+        self.findings = []
+
+    def __call__(self, command):
+        return "unused"
+
+    def checkpoint_finding(self, finding):
+        self.findings.append(finding)
+        return self.disposition
 
 
 class BrainTests(unittest.TestCase):
@@ -295,6 +309,52 @@ class BrainTests(unittest.TestCase):
             "run_bash", "submit_flag", "start_bash", "poll_bash", "cancel_bash",
         })
 
+    def test_checkpoint_finding_is_capability_gated_typed_and_budgeted(self):
+        shell = FindingShell()
+        summary = "The verifier decodes fixed-size blocks before comparison."
+        replies = [
+            {"content": "", "tool_calls": [{"id": "finding", "function": {
+                "name": "checkpoint_finding",
+                "arguments": json.dumps({"kind": "observed", "summary": summary}),
+            }}]},
+            {"content": "done"},
+        ]
+        agent = CapturingBrain(
+            replies, run_bash=shell, submit_flag=Mock(), verbose=False
+        )
+
+        result = agent.solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["tool_calls"], 1)
+        self.assertEqual(shell.findings, [Finding(FindingKind.OBSERVED, summary)])
+        self.assertIn(
+            "checkpoint_finding",
+            {tool["function"]["name"] for tool in agent._tools},
+        )
+        self.assertEqual(agent.requests[1][-1]["content"], "Finding saved for this exact scope.")
+
+    def test_rejected_or_duplicate_findings_are_quiet(self):
+        for disposition, summary, expected_calls in (
+            (FindingDisposition.REJECTED, "Recovered token synthetic-value", 0),
+            (FindingDisposition.DUPLICATE, "The decoder reverses input blocks.", 3),
+        ):
+            with self.subTest(disposition=disposition):
+                shell = FindingShell(disposition)
+                replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+                    "name": "checkpoint_finding",
+                    "arguments": json.dumps({"kind": "hypothesis", "summary": summary}),
+                }}]} for index in range(3)]
+                agent = ScriptedBrain(
+                    replies, run_bash=shell, submit_flag=Mock(), max_steps=4, verbose=False
+                )
+
+                result = agent.solve("synthetic")
+
+                self.assertEqual(result["error"], "quiet stall: no new tool evidence")
+                self.assertEqual(result["tool_calls"], 3)
+                self.assertEqual(len(shell.findings), expected_calls)
+
     def test_reasoning_details_round_trip_unchanged_after_tool_call(self):
         details = [{"type": "reasoning.summary", "id": "synthetic", "data": "opaque"}]
         replies = [
@@ -367,7 +427,7 @@ class BrainTests(unittest.TestCase):
         submitted = []
         replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
             "name": "submit_flag",
-            "arguments": json.dumps({"flag": "candidate-%d" % index})}}]}
+            "arguments": json.dumps({"flag": "INCYPHER{candidate-%d}" % index})}}]}
                    for index in range(1, 5)]
         agent = ScriptedBrain(
             replies,
@@ -645,6 +705,18 @@ class BrainTests(unittest.TestCase):
                     command.assert_not_called()
                     submit.assert_not_called()
 
+    def test_submit_tool_rejects_noncompetition_candidate_format(self):
+        submit = Mock()
+        agent = ScriptedBrain([
+            {"tool_calls": [{"id": "bad", "function": {
+                "name": "submit_flag", "arguments": json.dumps({"flag": "swordfish"}),
+            }}]},
+            {"content": "No supported result."},
+        ], run_bash=Mock(), submit_flag=submit, verbose=False)
+        result = agent.solve("sample")
+        self.assertFalse(result["solved"])
+        submit.assert_not_called()
+
     def test_duplicate_tool_candidate_does_not_spend_submission_budget(self):
         candidate = "INCYPHER" + "{duplicate-test}"
         reply = {"tool_calls": [{"id": "submit", "function": {
@@ -675,6 +747,21 @@ class BrainTests(unittest.TestCase):
                 self.assertFalse(result["solved"])
                 self.assertEqual(result["error"], "submission unavailable: uncertain")
                 submit.assert_called_once_with("INCYPHER{synthetic-one}")
+
+    def test_submission_callback_exception_becomes_terminal_uncertainty(self):
+        replies = [{"content": "", "tool_calls": [{"id": "submit", "function": {
+            "name": "submit_flag",
+            "arguments": json.dumps({"flag": "INCYPHER{synthetic}"}),
+        }}]}]
+        submit = Mock(side_effect=RuntimeError("transport failed after possible delivery"))
+        result = ScriptedBrain(
+            replies, run_bash=Mock(), submit_flag=submit, verbose=False
+        ).solve("synthetic")
+
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["verdict"], {"status": "uncertain"})
+        self.assertEqual(result["error"], "submission unavailable: uncertain")
+        self.assertEqual(submit.call_count, 1)
 
     def test_malformed_model_messages_return_failure_without_dispatch(self):
         for reply in ([], None, {"content": []}, {"tool_calls": {}},

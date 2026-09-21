@@ -3,6 +3,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from agent_ext.runtime_state import (
     AttemptOutcome,
@@ -15,6 +16,7 @@ from agent_ext.runtime_state import (
     RuntimeStateError,
     Scope,
 )
+from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
 
 class RuntimeStateTests(unittest.TestCase):
@@ -25,6 +27,16 @@ class RuntimeStateTests(unittest.TestCase):
         self.store = RuntimeState(self.path)
         self.static = Scope(7, "material-a", ChallengeKind.STATIC)
         self.dynamic = Scope(8, "material-b", ChallengeKind.DYNAMIC, "instance-a")
+
+    @staticmethod
+    def finding_context(scope, redaction_values=()):
+        return SimpleNamespace(
+            challenge_id=scope.challenge_id,
+            material_ref=scope.material_hash,
+            challenge_type=scope.kind.value,
+            instance_generation=scope.instance_hash,
+            redaction_values=tuple(redaction_values),
+        )
 
     def test_partial_transaction_rolls_back(self):
         def fail(operation):
@@ -49,7 +61,7 @@ class RuntimeStateTests(unittest.TestCase):
         lock.execute("ROLLBACK")
 
     def test_corrupt_and_oversized_rows_are_ignored(self):
-        self.store.record_observation(self.static, ObservationKind.FINDING, "valid")
+        self.store.record_observation(self.static, ObservationKind.TOOL, "valid")
         connection = sqlite3.connect(self.path)
         connection.execute(
             """INSERT INTO observations(scope_key, challenge_id, material_hash,
@@ -68,8 +80,14 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertIn("valid", projection.text)
 
     def test_static_and_dynamic_scope_mismatch(self):
-        self.store.record_observation(self.static, ObservationKind.FINDING, "static evidence")
-        self.store.record_observation(self.dynamic, ObservationKind.FINDING, "dynamic evidence")
+        self.store.checkpoint_finding(
+            self.finding_context(self.static),
+            Finding(FindingKind.OBSERVED, "Static evidence is reusable."),
+        )
+        self.store.checkpoint_finding(
+            self.finding_context(self.dynamic),
+            Finding(FindingKind.OBSERVED, "Dynamic evidence is reusable."),
+        )
         changed_material = Scope(7, "material-new", ChallengeKind.STATIC)
         changed_instance = Scope(8, "material-b", ChallengeKind.DYNAMIC, "instance-b")
         self.assertEqual(self.store.project(changed_material).record_count, 0)
@@ -82,10 +100,98 @@ class RuntimeStateTests(unittest.TestCase):
         other = Scope(9, "material-a", ChallengeKind.STATIC)
         self.assertFalse(self.store.command_seen(other, "id"))
 
+    def test_checkpoint_finding_is_typed_exact_and_scope_specific(self):
+        finding = Finding(
+            FindingKind.OBSERVED,
+            "The decoder applies XOR after reversing each input block.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(self.finding_context(self.static), finding, now=1),
+            FindingDisposition.SAVED,
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(self.finding_context(self.static), finding, now=2),
+            FindingDisposition.DUPLICATE,
+        )
+        other = Scope(9, "material-a", ChallengeKind.STATIC)
+        self.assertIs(
+            self.store.checkpoint_finding(self.finding_context(other), finding, now=3),
+            FindingDisposition.SAVED,
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(
+                self.finding_context(self.static), finding.summary, now=4
+            ),
+            FindingDisposition.REJECTED,
+        )
+        projection = self.store.project(self.static)
+        self.assertEqual(projection.record_count, 1)
+        self.assertIn(finding.summary, projection.text)
+        self.assertIn('"progress":1', projection.text)
+        self.assertIn('"finding_kind":"observed"', projection.text)
+        self.assertIs(
+            self.store.checkpoint_finding(self.static, finding, now=5),
+            FindingDisposition.REJECTED,
+        )
+
+    def test_connection_redaction_term_is_rejected_without_persistence(self):
+        class Context:
+            challenge_id = 7
+            material_ref = "material-a"
+            challenge_type = "static"
+            instance_generation = None
+            redaction_values = ("synthetic-box", "31337")
+
+        finding = Finding(
+            FindingKind.HYPOTHESIS,
+            "The synthetic-box process may parse length before content.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(Context(), finding),
+            FindingDisposition.REJECTED,
+        )
+        self.store.checkpoint()
+        payload = b"".join(path.read_bytes() for path in self.path.parent.glob("state.sqlite3*"))
+        self.assertNotIn(b"synthetic-box", payload)
+
+    def test_short_case_changed_connection_terms_are_rejected_before_write(self):
+        class Context:
+            challenge_id = 7
+            material_ref = "material-a"
+            challenge_type = "static"
+            instance_generation = None
+            redaction_values = ("nc xy 7",)
+
+        finding = Finding(
+            FindingKind.OBSERVED,
+            "The route label is XY and stage is 7.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(Context(), finding),
+            FindingDisposition.REJECTED,
+        )
+        self.store.checkpoint()
+        payload = b"".join(path.read_bytes() for path in self.path.parent.glob("state.sqlite3*"))
+        self.assertNotIn(b"route label", payload)
+
+    def test_unlabelled_runtime_credential_value_is_rejected_before_write(self):
+        context = self.finding_context(self.static, ("swordfish",))
+        finding = Finding(
+            FindingKind.OBSERVED,
+            "The derived label is SwordFish.",
+        )
+        self.assertIs(
+            self.store.checkpoint_finding(context, finding),
+            FindingDisposition.REJECTED,
+        )
+        self.store.checkpoint()
+        payload = b"".join(path.read_bytes() for path in self.path.parent.glob("state.sqlite3*"))
+        self.assertNotIn(b"SwordFish", payload)
+
     def test_projection_is_bounded_and_sanitized(self):
         for index in range(40):
             self.store.record_observation(
-                self.static, ObservationKind.FINDING, f"record-{index} " + "x" * 600,
+                self.static, ObservationKind.TOOL, f"record-{index} " + "x" * 600,
                 progress=index,
             )
         projection = self.store.project(self.static)

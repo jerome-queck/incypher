@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from .runtime_context import DYNAMIC_CHALLENGE_TYPES
+from .runtime_context import (
+    DYNAMIC_CHALLENGE_TYPES,
+    Finding,
+    FindingDisposition,
+    FindingKind,
+)
 
 
 MAX_PROJECTION_RECORDS = 16
@@ -289,6 +294,7 @@ class RuntimeState:
                         challenge_kind TEXT NOT NULL,
                         instance_hash TEXT,
                         observation_kind TEXT NOT NULL,
+                        finding_kind TEXT,
                         command_fp TEXT,
                         output_fp TEXT,
                         summary TEXT NOT NULL,
@@ -297,10 +303,20 @@ class RuntimeState:
                     );
                     CREATE UNIQUE INDEX IF NOT EXISTS observations_command_dedupe
                         ON observations(scope_key, command_fp) WHERE command_fp IS NOT NULL;
+                    CREATE UNIQUE INDEX IF NOT EXISTS observations_finding_dedupe
+                        ON observations(scope_key, output_fp)
+                        WHERE observation_kind = 'finding' AND output_fp IS NOT NULL;
                     CREATE INDEX IF NOT EXISTS observations_scope_time
                         ON observations(scope_key, created_at DESC, id DESC);
                     """
                 )
+                columns = {
+                    row["name"] for row in connection.execute("PRAGMA table_info(observations)")
+                }
+                if "finding_kind" not in columns:
+                    connection.execute(
+                        "ALTER TABLE observations ADD COLUMN finding_kind TEXT"
+                    )
         except (OSError, sqlite3.Error) as exc:
             raise RuntimeStateError("runtime state is unavailable") from exc
 
@@ -693,12 +709,53 @@ class RuntimeState:
             sensitive_values=sensitive_values, now=now,
         )
 
+    def checkpoint_finding(
+        self,
+        context: Scope | object,
+        finding: Finding,
+        *,
+        now: float | None = None,
+    ) -> FindingDisposition:
+        """Persist one typed safe finding with exact, scope-local dedupe."""
+        if not isinstance(finding, Finding):
+            return FindingDisposition.REJECTED
+        if isinstance(context, Scope):
+            return FindingDisposition.REJECTED
+        scope = scope_from_context(context)
+        redaction_values = _field(context, "redaction_values", None)
+        if (
+            not isinstance(redaction_values, Sequence)
+            or isinstance(redaction_values, (str, bytes))
+            or finding.contains_redaction_value(redaction_values)
+        ):
+            return FindingDisposition.REJECTED
+        fingerprint = _fingerprint(json.dumps(
+            [finding.kind.value, finding.summary],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ))
+        recorded = self._record_observation(
+            scope,
+            ObservationKind.FINDING,
+            finding.summary,
+            finding_kind=finding.kind,
+            output_fp=fingerprint,
+            progress=1,
+            now=now,
+        )
+        return (
+            FindingDisposition.SAVED
+            if recorded
+            else FindingDisposition.DUPLICATE
+        )
+
     def _record_observation(
         self,
         scope: Scope,
         kind: ObservationKind,
         summary: str,
         *,
+        finding_kind: FindingKind | None = None,
         command_fp: str | None = None,
         output_fp: str | None = None,
         progress: int = 0,
@@ -707,9 +764,14 @@ class RuntimeState:
     ) -> bool:
         if not isinstance(scope, Scope) or not isinstance(kind, ObservationKind):
             raise ValueError("typed scope and observation kind required")
+        if finding_kind is not None and (
+            kind is not ObservationKind.FINDING
+            or not isinstance(finding_kind, FindingKind)
+        ):
+            raise ValueError("finding kind is valid only for typed findings")
         if type(progress) is not int or not 0 <= progress <= 1_000_000:
             raise ValueError("progress must be a bounded nonnegative integer")
-        clean = _sanitize(summary, sensitive_values)
+        clean = summary if finding_kind is not None else _sanitize(summary, sensitive_values)
         instant = time.time() if now is None else float(now)
         if not math.isfinite(instant):
             raise ValueError("now must be finite")
@@ -721,14 +783,15 @@ class RuntimeState:
                         """
                         INSERT INTO observations(
                             scope_key, challenge_id, material_hash, challenge_kind,
-                            instance_hash, observation_kind, command_fp, output_fp,
-                            summary, progress, created_at
-                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            instance_hash, observation_kind, finding_kind, command_fp,
+                            output_fp, summary, progress, created_at
+                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             scope.key, scope.challenge_id, scope.material_hash, scope.kind.value,
-                            scope.instance_hash, kind.value, command_fp, output_fp, clean,
-                            progress, instant,
+                            scope.instance_hash, kind.value,
+                            finding_kind.value if finding_kind is not None else None,
+                            command_fp, output_fp, clean, progress, instant,
                         ),
                     )
                 except sqlite3.IntegrityError:
@@ -763,6 +826,16 @@ class RuntimeState:
                 and row["challenge_kind"] == scope.kind.value
                 and row["instance_hash"] == scope.instance_hash
                 and ObservationKind(row["observation_kind"])
+                and (
+                    (
+                        row["observation_kind"] == ObservationKind.FINDING.value
+                        and FindingKind(row["finding_kind"])
+                    )
+                    or (
+                        row["observation_kind"] != ObservationKind.FINDING.value
+                        and row["finding_kind"] is None
+                    )
+                )
                 and isinstance(summary, str)
                 and 0 < len(summary.encode("utf-8")) <= MAX_SUMMARY_BYTES
                 and type(row["progress"]) is int
@@ -791,12 +864,15 @@ class RuntimeState:
         for row in rows:
             if len(lines) >= MAX_PROJECTION_RECORDS or not self._valid_observation(row, scope):
                 continue
+            projected = {
+                "kind": row["observation_kind"],
+                "summary": row["summary"],
+                "progress": row["progress"],
+            }
+            if row["finding_kind"] is not None:
+                projected["finding_kind"] = row["finding_kind"]
             record = json.dumps(
-                {
-                    "kind": row["observation_kind"],
-                    "summary": row["summary"],
-                    "progress": row["progress"],
-                },
+                projected,
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),

@@ -23,8 +23,13 @@ connections, credentials and candidate flags are not persisted.
 - Call `command_seen(scope, raw_command)` before dispatch. After execution,
   `record_command()` stores only scoped command/output fingerprints and a sanitized
   summary. A `False` return means another writer already recorded the exact command.
-- `record_observation()` checkpoints non-command findings. Pass known secret values via
-  `sensitive_values`; command and small output values are automatically redacted.
+- `checkpoint_finding(context, Finding(kind, summary))` stores only typed `observed`,
+  `hypothesis`, `failed_method`, or `next_step` summaries. Findings are at most 384 UTF-8
+  bytes and are rejected before write if they contain candidate, credential, connection,
+  address, opaque-secret, or exact transient runtime-secret values. Exact scope-local
+  duplicates add no progress.
+- `record_observation()` remains the lower-level non-command API. Pass known secret values
+  via `sensitive_values`; command and small output values are automatically redacted.
 - `project(scope)` returns newline-delimited JSON for Brain: newest applicable records,
   at most 16 and at most 8 KiB. Static evidence requires the same material hash;
   dynamic evidence additionally requires the same instance-generation hash.
@@ -39,5 +44,5 @@ lock failures raise payload-free `RuntimeStateError`; callers should fail closed
 than execute an undeduplicated command or lose a required outcome checkpoint.
 
 Limits: 4,096 trusted briefs per rank call, 256 observations per scope, 4,096 total
-observations, 512 UTF-8 bytes per summary, 64 KiB per raw command accepted for hashing,
+observations, 512 UTF-8 bytes per generic summary (384 for findings), 64 KiB per raw command accepted for hashing,
 16 projected records and 8 KiB projected text.

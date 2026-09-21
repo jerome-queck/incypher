@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import arena_main
 import brain
+from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
 
 class _FakeManagedShell:
@@ -97,7 +98,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             targets.sort(key=lambda challenge: challenge["id"])
             for brief in targets:
                 challenge = client.challenge(brief["id"])
-                official.solve_challenge(client, challenge, 3)
+                official.solve_challenge(client, challenge, 6)
             return 0
 
         official.main = inherited_main
@@ -156,7 +157,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         self.assertEqual(_FakeManagedShell.instances[0].commands, ["inspect material"])
         self.assertTrue(_FakeManagedShell.instances[0].closed)
 
-    def test_crash_checkpoint_reorders_the_next_inherited_lifecycle(self):
+    def test_crash_checkpoint_reorders_the_next_same_run_pass(self):
         challenges = [
             {
                 "id": 1,
@@ -228,9 +229,13 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }, clear=True),
                 patch("agent_ext.runtime_state.time.time", return_value=100.0),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch("arena_main.time.sleep"),
             ):
                 self.assertEqual(arena_main.main(), 0)
-                self.assertEqual(events, [("detail", 1), ("solve", 1)])
+                self.assertEqual(events, [
+                    ("detail", 1), ("solve", 1),
+                    ("detail", 2), ("solve", 2),
+                ])
                 self.assertEqual(returned[0]["error"], "RuntimeError: attempt crashed")
                 connection = sqlite3.connect(state_path)
                 try:
@@ -240,11 +245,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 finally:
                     connection.close()
                 self.assertGreater(progress, 0)
-
-                events.clear()
-                self.assertEqual(arena_main.main(), 0)
-
-        self.assertEqual(events, [("detail", 2), ("solve", 2)])
+                self.assertEqual(len(returned), 2)
 
     def test_async_shell_flows_through_harness_and_persists_evidence(self):
         challenge = {
@@ -386,6 +387,439 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             finally:
                 connection.close()
         self.assertEqual(outcome, "timeout")
+
+    def test_outer_passes_are_serial_cooled_and_capped_per_challenge(self):
+        challenge = {
+            "id": 21, "name": "multipass", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }
+        findings = (
+            "The decoder first reverses each fixed width block.",
+            "The checksum covers decoded bytes before padding.",
+            "The comparison accepts a lowercase hexadecimal digest.",
+            "The final branch requires an even decoded length.",
+        )
+        calls = []
+        active = 0
+
+        def solve_challenge(client, ch, max_steps):
+            nonlocal active
+            self.assertEqual(active, 0)
+            active += 1
+            try:
+                calls.append((ch["id"], max_steps))
+                disposition = solver.run_bash.checkpoint_finding(
+                    Finding(FindingKind.OBSERVED, findings[len(calls) - 1])
+                )
+                self.assertIs(disposition, FindingDisposition.SAVED)
+                return {
+                    "solved": False, "steps": 1,
+                    "model_calls": 1, "tool_calls": 0,
+                }
+            finally:
+                active -= 1
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "multipass_solver"
+        )
+        sleeps = []
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {"main": official, "multipass_solver": solver}),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+                patch("arena_main.time.sleep", side_effect=sleeps.append),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(calls, [(21, 6)] * 4)
+        self.assertEqual(sleeps, [2.0, 2.0, 2.0])
+
+    def test_duplicate_finding_stops_after_no_semantic_progress(self):
+        challenge = {
+            "id": 22, "name": "duplicate", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }
+        dispositions = []
+
+        def solve_challenge(client, ch, max_steps):
+            dispositions.append(solver.run_bash.checkpoint_finding(Finding(
+                FindingKind.OBSERVED,
+                "The parser strips a trailing newline before decoding.",
+            )))
+            return {
+                "solved": False, "steps": 1,
+                "model_calls": 1, "tool_calls": 0,
+            }
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "duplicate_finding_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "duplicate_finding_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+                patch("arena_main.time.sleep"),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(
+            dispositions,
+            [FindingDisposition.SAVED, FindingDisposition.DUPLICATE],
+        )
+
+    def test_saved_finding_enables_second_pass_solve(self):
+        challenge = {
+            "id": 23, "name": "finding-retry", "category": "misc",
+            "type": "standard", "value": 100, "files": [],
+        }
+        attempts = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempts.append(ch["id"])
+            if len(attempts) == 1:
+                self.assertIs(
+                    solver.run_bash.checkpoint_finding(Finding(
+                        FindingKind.HYPOTHESIS,
+                        "The checksum likely covers bytes before final padding.",
+                    )),
+                    FindingDisposition.SAVED,
+                )
+                return {
+                    "solved": False, "steps": 1,
+                    "model_calls": 1, "tool_calls": 1,
+                }
+            return {
+                "solved": True, "steps": 1,
+                "model_calls": 1, "tool_calls": 0,
+            }
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "finding_retry_solver"
+        )
+        sleeps = []
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "finding_retry_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+                patch("arena_main.time.sleep", side_effect=sleeps.append),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempts, [23, 23])
+        self.assertEqual(sleeps, [2.0])
+
+    def test_global_model_budget_shrinks_final_slice_and_stops(self):
+        challenges = [
+            {"id": challenge_id, "name": f"budget-{challenge_id}",
+             "category": "misc", "type": "standard", "value": 100, "files": []}
+            for challenge_id in (31, 32, 33)
+        ]
+        allocated = []
+
+        def solve_challenge(client, ch, max_steps):
+            allocated.append(max_steps)
+            self.assertIs(
+                solver.run_bash.checkpoint_finding(Finding(
+                    FindingKind.OBSERVED,
+                    "The verifier normalizes case before comparing the digest."
+                    if ch["id"] == 31 else
+                    "The verifier checks length before normalizing the digest."
+                )),
+                FindingDisposition.SAVED,
+            )
+            return {
+                "solved": False, "steps": max_steps,
+                "model_calls": max_steps, "tool_calls": 0,
+            }
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "model_budget_solver"
+        )
+
+        def high_step_main():
+            client = official.CTFdClient("base", "token")
+            for brief in client.list_challenges():
+                official.solve_challenge(client, client.challenge(brief["id"]), 100)
+            return 0
+
+        official.main = high_step_main
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {"main": official, "model_budget_solver": solver}),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(allocated, [100, 50])
+
+    def test_provider_uncertainty_stops_later_solver_dispatch(self):
+        challenges = [
+            {"id": challenge_id, "name": f"provider-{challenge_id}",
+             "category": "misc", "type": "standard", "value": 100, "files": []}
+            for challenge_id in (41, 42)
+        ]
+        attempted = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempted.append(ch["id"])
+            return {
+                "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 0,
+                "error": "GatewayError: model request failed",
+            }
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "provider_stop_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {"main": official, "provider_stop_solver": solver}),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempted, [41])
+
+    def test_crashed_slices_charge_model_calls_to_global_cap(self):
+        challenges = [
+            {"id": challenge_id, "name": f"crash-{challenge_id}",
+             "category": "misc", "type": "standard", "value": 100, "files": []}
+            for challenge_id in (71, 72, 73)
+        ]
+        attempted = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempted.append((ch["id"], max_steps))
+            for _ in range(max_steps):
+                solver.run_bash.record_model_progress()
+            raise RuntimeError("synthetic crash after accepted turns")
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "crash_budget_solver"
+        )
+
+        def high_step_main():
+            client = official.CTFdClient("base", "token")
+            for brief in client.list_challenges():
+                official.solve_challenge(client, client.challenge(brief["id"]), 100)
+            return 0
+
+        official.main = high_step_main
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {"main": official, "crash_budget_solver": solver}),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempted, [(71, 100), (72, 50)])
+
+    def test_submission_uncertainty_stops_later_solver_dispatch(self):
+        challenges = [
+            {"id": challenge_id, "name": f"submission-{challenge_id}",
+             "category": "misc", "type": "standard", "value": 100, "files": []}
+            for challenge_id in (51, 52)
+        ]
+        attempted = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempted.append(ch["id"])
+            return {
+                "solved": False, "steps": 1, "model_calls": 1, "tool_calls": 0,
+                "error": "submission unavailable: uncertain",
+                "verdict": {"status": "uncertain"},
+            }
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "submission_stop_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "submission_stop_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempted, [51])
+
+    def test_raised_submission_callback_stops_later_solver_dispatch(self):
+        challenges = [
+            {"id": challenge_id, "name": f"raised-submission-{challenge_id}",
+             "category": "misc", "type": "standard", "value": 100, "files": []}
+            for challenge_id in (53, 54)
+        ]
+        attempted = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempted.append(ch["id"])
+            prompt = solver.build_prompt(ch, material_directory, [], None)
+            replies = [{"content": "", "tool_calls": [{"id": "submit", "function": {
+                "name": "submit_flag",
+                "arguments": json.dumps({"flag": "INCYPHER{synthetic}"}),
+            }}]}]
+
+            def uncertain_submission(_flag):
+                raise RuntimeError("transport failed after possible delivery")
+
+            return _ScriptedBrain(
+                replies, solver.run_bash, uncertain_submission,
+                max_steps=max_steps, verbose=False,
+            ).solve(prompt)
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "raised_submission_stop_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            material_directory = directory
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "raised_submission_stop_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempted, [53])
+
+    def test_total_slice_and_deadline_admission_are_hard_bounded(self):
+        with patch("arena_main.time.monotonic", side_effect=[0.0, 21600.0]):
+            deadline = arena_main._OuterCoordinator()
+            self.assertEqual(deadline.admit(1, 4), (None, "run deadline"))
+
+        slices = arena_main._OuterCoordinator()
+        for challenge_id in range(1, 16):
+            for _ in range(4):
+                self.assertEqual(slices.admit(challenge_id, 1), (1, None))
+        self.assertEqual(slices.total_slices, 60)
+        self.assertEqual(slices.admit(16, 1), (None, "slice budget"))
+
+    def test_dynamic_lifecycles_cleanup_before_each_outer_pass(self):
+        challenge = {
+            "id": 61, "name": "dynamic", "category": "misc",
+            "type": "dynamic_iac", "value": 100, "files": [],
+        }
+        calls = []
+        lifecycle = {"live": False, "cleanups": 0}
+
+        def solve_challenge(client, ch, max_steps):
+            calls.append(ch["id"])
+            solver.build_prompt(ch, material_directory, [], "synthetic connection")
+            solver.run_bash(f"inspect generation {len(calls)}")
+            return {
+                "solved": False, "steps": 1,
+                "model_calls": 1, "tool_calls": 1,
+            }
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "dynamic_serial_solver"
+        )
+
+        def lifecycle_main():
+            self.assertFalse(lifecycle["live"])
+            lifecycle["live"] = True
+            client = official.CTFdClient("base", "token")
+            try:
+                brief = client.list_challenges()[0]
+                official.solve_challenge(client, client.challenge(brief["id"]), 6)
+            finally:
+                lifecycle["live"] = False
+                lifecycle["cleanups"] += 1
+            return 0
+
+        official.main = lifecycle_main
+        with tempfile.TemporaryDirectory() as directory:
+            material_directory = directory
+            with (
+                patch.dict(sys.modules, {
+                    "main": official, "dynamic_serial_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+                patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch("arena_main.time.sleep"),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(calls, [61] * 4)
+        self.assertEqual(lifecycle, {"live": False, "cleanups": 4})
+        self.assertTrue(all(shell.closed for shell in _FakeManagedShell.instances))
+
+    def test_later_official_pass_synthesizes_locally_solved_result(self):
+        challenges = [
+            {"id": challenge_id, "name": f"mixed-{challenge_id}",
+             "category": "misc", "type": "standard", "value": 100, "files": []}
+            for challenge_id in (71, 72)
+        ]
+        attempts = []
+        pass_results = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempts.append(ch["id"])
+            if ch["id"] == 71:
+                return {
+                    "solved": True, "steps": 1,
+                    "model_calls": 1, "tool_calls": 0,
+                }
+            if attempts.count(72) == 1:
+                solver.run_bash("inspect mixed challenge")
+            return {
+                "solved": False, "steps": 1,
+                "model_calls": 1, "tool_calls": 0,
+            }
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "mixed_result_solver"
+        )
+
+        def captured_main():
+            client = official.CTFdClient("base", "token")
+            results = []
+            for brief in client.list_challenges():
+                results.append(official.solve_challenge(
+                    client, client.challenge(brief["id"]), 6
+                ))
+            pass_results.append(results)
+            return 0
+
+        official.main = captured_main
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {"main": official, "mixed_result_solver": solver}),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+                patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch("arena_main.time.sleep"),
+            ):
+                self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(attempts, [71, 72, 72])
+        self.assertEqual(len(pass_results), 2)
+        synthesized = next(item for item in pass_results[1] if item.get("id") == 71)
+        self.assertTrue(synthesized["solved"])
+        self.assertEqual(synthesized["model_calls"], 0)
 
 
 if __name__ == "__main__":

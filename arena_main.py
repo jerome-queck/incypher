@@ -14,7 +14,13 @@ from collections.abc import Mapping
 
 from agent_ext.managed_shell import ManagedShell, RESOURCE_STATUSES, parse_shell_projection
 from agent_ext.resources import Admission, Capacity
-from agent_ext.runtime_context import bind_prepared_material, current_attempt, trusted_attempt
+from agent_ext.runtime_context import (
+    Finding,
+    FindingDisposition,
+    bind_prepared_material,
+    current_attempt,
+    trusted_attempt,
+)
 from agent_ext.runtime_state import AttemptOutcome, RuntimeState, RuntimeStateError
 
 
@@ -39,6 +45,11 @@ _OFFICIAL_AST = {
     "is_practice": "d6e6b7c08dbe14b5094e557787c911c792e488ba163fbb11f10f36772371aa05",
     "client_init": "40b975045df8353cd811139e3fdd9266f976daa68c416e7a0db5a5aa92552b2c",
 }
+_MAX_SLICES_PER_CHALLENGE = 4
+_MAX_TOTAL_SLICES = 60
+_MAX_MODEL_CALLS = 150
+_MAX_RUN_SECONDS = 6 * 60 * 60
+_PASS_COOLDOWN_SECONDS = 2.0
 
 
 def _require_signature(function, names, label):
@@ -136,6 +147,8 @@ class _StatefulShell:
         self._commands: dict[str, str] = {}
         self._failure: AttemptOutcome | None = None
         self._progress = 0
+        self._model_progress = 0
+        self._semantic_progress = 0
 
     def _get_shell(self) -> ManagedShell:
         if self._shell is None:
@@ -154,7 +167,7 @@ class _StatefulShell:
         return command in self._commands.values() or self._state.lookup(context, command)
 
     def _record(self, command: str, output: str) -> None:
-        status, _ = parse_shell_projection(output)
+        status, has_payload = parse_shell_projection(output)
         classified = None
         if status == "timeout":
             classified = AttemptOutcome.TIMEOUT
@@ -181,11 +194,23 @@ class _StatefulShell:
         if recorded:
             self._state.record_challenge_progress(context.challenge_id)
             self._progress += 1
+            if has_payload and status == "ok":
+                self._semantic_progress += 1
 
     def record_model_progress(self) -> None:
         context = current_attempt(required=True)
         self._state.record_challenge_progress(context.challenge_id)
         self._progress += 1
+        self._model_progress += 1
+
+    def checkpoint_finding(self, finding: Finding) -> FindingDisposition:
+        context = current_attempt(required=True)
+        disposition = self._state.checkpoint_finding(context, finding)
+        if disposition is FindingDisposition.SAVED:
+            self._state.record_challenge_progress(context.challenge_id)
+            self._progress += 1
+            self._semantic_progress += 1
+        return disposition
 
     def __call__(self, command: str) -> str:
         if self._duplicate(command):
@@ -240,6 +265,14 @@ class _StatefulShell:
     def progress(self) -> int:
         return self._progress
 
+    @property
+    def model_progress(self) -> int:
+        return self._model_progress
+
+    @property
+    def semantic_progress(self) -> int:
+        return self._semantic_progress
+
 
 def _failure_class(result: Mapping, shell: _StatefulShell) -> AttemptOutcome:
     error = str(result.get("error", "")).lower()
@@ -270,6 +303,120 @@ def _solved_result(challenge: Mapping) -> dict:
         "model_calls": 0,
         "tool_calls": 0,
     }
+
+
+def _deferred_result(challenge: Mapping, reason: str) -> dict:
+    return {
+        "id": int(challenge["id"]),
+        "name": challenge.get("name", "unknown"),
+        "category": challenge.get("category"),
+        "type": challenge.get("type"),
+        "had_files": False,
+        "had_instance": False,
+        "seconds": 0.0,
+        "solved": False,
+        "steps": 0,
+        "model_calls": 0,
+        "tool_calls": 0,
+        "error": "coordinator stopped: " + reason,
+    }
+
+
+class _OuterCoordinator:
+    """Bound repeated inherited lifecycles without owning their results."""
+
+    def __init__(self):
+        self.deadline = time.monotonic() + _MAX_RUN_SECONDS
+        self.slice_counts: dict[int, int] = {}
+        self.solved: set[int] = set()
+        self.total_slices = 0
+        self.model_calls = 0
+        self.stop_reason: str | None = None
+        self.begin_pass()
+
+    def begin_pass(self) -> None:
+        self.pass_calls = 0
+        self.pass_slices = 0
+        self.pass_semantic_progress = False
+        self.pass_all_solved = True
+        self.pass_seen: set[int] = set()
+
+    def note_catalogue_solved(self, challenge_id: int) -> None:
+        self.pass_calls += 1
+        self.pass_seen.add(challenge_id)
+        self.solved.add(challenge_id)
+
+    def admit(self, challenge_id: int, max_steps: int) -> tuple[int | None, str | None]:
+        self.pass_calls += 1
+        self.pass_seen.add(challenge_id)
+        if challenge_id in self.solved:
+            return None, "solved"
+        if self.stop_reason is not None:
+            self.pass_all_solved = False
+            return None, self.stop_reason
+        if time.monotonic() >= self.deadline:
+            self.stop_reason = "run deadline"
+        elif self.total_slices >= _MAX_TOTAL_SLICES:
+            self.stop_reason = "slice budget"
+        elif self.model_calls >= _MAX_MODEL_CALLS:
+            self.stop_reason = "model-call budget"
+        elif self.slice_counts.get(challenge_id, 0) >= _MAX_SLICES_PER_CHALLENGE:
+            self.pass_all_solved = False
+            return None, "challenge slice budget"
+        if self.stop_reason is not None:
+            self.pass_all_solved = False
+            return None, self.stop_reason
+        remaining_calls = _MAX_MODEL_CALLS - self.model_calls
+        allocated_steps = min(max_steps, remaining_calls)
+        if allocated_steps <= 0:
+            self.stop_reason = "model-call budget"
+            self.pass_all_solved = False
+            return None, self.stop_reason
+        self.slice_counts[challenge_id] = self.slice_counts.get(challenge_id, 0) + 1
+        self.total_slices += 1
+        self.pass_slices += 1
+        return allocated_steps, None
+
+    def note_result(
+        self,
+        challenge_id: int,
+        *,
+        solved: bool,
+        model_calls: int,
+        semantic_progress: bool,
+        outcome: AttemptOutcome,
+    ) -> None:
+        self.model_calls += model_calls
+        if self.model_calls >= _MAX_MODEL_CALLS:
+            self.stop_reason = "model-call budget"
+        if time.monotonic() >= self.deadline:
+            self.stop_reason = "run deadline"
+        if outcome is AttemptOutcome.PROVIDER:
+            self.stop_reason = "provider uncertainty"
+        elif outcome is AttemptOutcome.SUBMISSION:
+            self.stop_reason = "submission uncertainty"
+        if solved:
+            self.solved.add(challenge_id)
+        else:
+            self.pass_all_solved = False
+        self.pass_semantic_progress |= semantic_progress
+
+    def should_continue(self) -> bool:
+        if self.stop_reason is not None:
+            return False
+        if self.pass_calls == 0 or self.pass_slices == 0 or self.pass_all_solved:
+            return False
+        if not self.pass_semantic_progress:
+            return False
+        if self.total_slices >= _MAX_TOTAL_SLICES or self.model_calls >= _MAX_MODEL_CALLS:
+            return False
+        if all(
+            challenge_id in self.solved
+            or self.slice_counts.get(challenge_id, 0) >= _MAX_SLICES_PER_CHALLENGE
+            for challenge_id in self.pass_seen
+        ):
+            return False
+        return time.monotonic() + _PASS_COOLDOWN_SECONDS < self.deadline
 
 
 def main():
@@ -323,6 +470,7 @@ def main():
     state = RuntimeState(os.environ.get("RUNTIME_STATE_PATH", "/work/runtime-state.sqlite3"))
     admission = Admission(Capacity(512 * 1024 * 1024, 64, active=2, heavy=1, queued=8))
     validation_selector = os.path.isfile("/opt/agent/.validation-id")
+    coordinator = _OuterCoordinator()
 
     def client_factory(base, token):
         return _RankedClient(inherited_client(base, token), state)
@@ -337,24 +485,41 @@ def main():
 
     def scoped_solve(client, ch, max_steps):
         cid = ch.get("id")
+        if type(cid) is not int or cid <= 0 or type(max_steps) is not int:
+            raise RuntimeError("Official solve arguments changed; inspect base contract")
         if not validation_selector and isinstance(client, _RankedClient) and client.trusted_solved(cid):
+            coordinator.note_catalogue_solved(cid)
             result = _solved_result(ch)
             state.record_challenge_outcome(int(cid), True, 0, AttemptOutcome.UNSOLVED)
             return result
+        allocated_steps, deferred = coordinator.admit(cid, max_steps)
+        if deferred == "solved":
+            return _solved_result(ch)
+        if deferred is not None:
+            return _deferred_result(ch, deferred)
+        assert allocated_steps is not None
         shell = _StatefulShell(state, admission, os.getcwd())
         started = time.perf_counter()
         with trusted_attempt(ch):
             solver_module.run_bash = shell
             try:
-                result = inherited_solve(client, ch, max_steps)
+                result = inherited_solve(client, ch, allocated_steps)
             except (
                 RuntimeStateError, OSError, ValueError, KeyError, TypeError,
                 RuntimeError, TimeoutError,
             ) as exc:
+                observed_model_calls = min(allocated_steps, shell.model_progress)
                 state.record_challenge_outcome(
                     int(cid), False, shell.progress, AttemptOutcome.CRASH
                 )
                 state.checkpoint()
+                coordinator.note_result(
+                    cid,
+                    solved=False,
+                    model_calls=observed_model_calls,
+                    semantic_progress=shell.semantic_progress > 0,
+                    outcome=AttemptOutcome.CRASH,
+                )
                 return {
                     "id": int(cid),
                     "name": ch.get("name", "unknown"),
@@ -365,7 +530,7 @@ def main():
                     "seconds": round(time.perf_counter() - started, 1),
                     "solved": False,
                     "steps": 0,
-                    "model_calls": 0,
+                    "model_calls": observed_model_calls,
                     "tool_calls": 0,
                     "error": f"{type(exc).__name__}: attempt crashed",
                 }
@@ -376,16 +541,35 @@ def main():
             state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
             raise RuntimeError("Official solve result changed; inspect base contract")
         solved = result.get("solved") is True
+        result_model_calls = result.get("model_calls", 0)
+        if (
+            type(result_model_calls) is not int
+            or not 0 <= result_model_calls <= allocated_steps
+        ):
+            state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
+            raise RuntimeError("Official model-call result changed; inspect base contract")
+        observed_model_calls = max(result_model_calls, shell.model_progress)
+        if observed_model_calls > allocated_steps:
+            state.record_challenge_outcome(int(cid), False, 0, AttemptOutcome.CRASH)
+            raise RuntimeError("Official model-call bound changed; inspect base contract")
         progress = max(shell.progress, min(
             1_000_000,
             max(0, int(result.get("model_calls", 0)))
             + max(0, int(result.get("tool_calls", 0))),
         ))
+        outcome = AttemptOutcome.SOLVED if solved else _failure_class(result, shell)
         state.record_challenge_outcome(
             int(cid), solved, progress,
-            AttemptOutcome.SOLVED if solved else _failure_class(result, shell),
+            outcome,
         )
         state.checkpoint()
+        coordinator.note_result(
+            cid,
+            solved=solved,
+            model_calls=observed_model_calls,
+            semantic_progress=solved or shell.semantic_progress > 0,
+            outcome=outcome,
+        )
         return result
 
     official_main.is_practice = lambda challenge: False
@@ -393,7 +577,12 @@ def main():
     official_main.solve_challenge = scoped_solve
     solver_module.build_prompt = scoped_build_prompt
     try:
-        return official_main.main()
+        while True:
+            coordinator.begin_pass()
+            return_code = official_main.main()
+            if return_code not in (None, 0) or not coordinator.should_continue():
+                return return_code
+            time.sleep(_PASS_COOLDOWN_SECONDS)
     finally:
         official_main.is_practice = inherited_is_practice
         official_main.CTFdClient = inherited_client
