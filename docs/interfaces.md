@@ -34,6 +34,7 @@ adapter; binding it remains integration work.
 | Concern | Reference |
 | --- | --- |
 | Scheduling, attempt ownership, adapter callbacks, retries | [strategy.md](strategy.md) |
+| Model requests, capability gating and durable cost admission | [model-gateway.md](model-gateway.md) |
 | Bounded fixed inspections, resource leases, cancellation | [tooling.md](tooling.md) |
 | Evidence scope, qualification, durable intents, projection | [evidence-policy.md](evidence-policy.md) |
 | Inspected organiser behavior and result shapes | [arena-contract.md](arena-contract.md) |

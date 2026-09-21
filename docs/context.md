@@ -18,6 +18,7 @@ were merged. No open PR contained the requested general practice-selection chang
 | `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; practice filter disabled by a narrow wrapper | Official selection (`ONLY_IDS`), solving, instance lifecycle and results remain inherited |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
 | `brain.py`, `agent_ext/adapters.py` | Active synchronous Chat Completions loop | Shell + submit tools; no category skills, memory, cost ledger or scheduler wired in |
+| `agent_ext/model_gateway.py` | Reviewed foundation; not connected to Brain | Exact injected identity, capability-gated options and durable cost reservations exist; production discovery/admission/wiring remain open |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `resources.py`, `tools/` | Merged fixed local inspections | Not a bounded replacement for arbitrary shell; not invoked by normal Brain |
 | `memory.py`, `verification.py`, `submission_state.py`, `results.py` | Merged evidence/SQLite helpers | Production callbacks and official result mapping remain unconnected |
@@ -31,7 +32,7 @@ raw provider exception text leaking into results. The optional bridge retains it
 
 ## Evidence and release identity
 
-- Public boards at **21 Sep 19:42 SGT**: rank 8/16, VALID 650, SCORE 650, five solves;
+- Public boards at **21 Sep 21:49 SGT**: rank 8, VALID 650, SCORE 650, five solves;
   status 5/15, 12 pushes, last push 17:43:14, `done`, penalty 0. This is Day-1 evidence,
   not final competition score. Read `/scores` and `/status` again for current values.
 - Source docs previously called an older digest “current.” That is historical evidence
@@ -45,9 +46,17 @@ raw provider exception text leaking into results. The optional bridge retains it
   with Team 63 platform configuration and the Day-1 provider triplet migrated from the
   prior private files. `doctor` reports every required field set, registry login succeeds,
   and Codex CLI reports ChatGPT login. No value or account token was logged or committed.
-- This setup refresh did not build, check, practice with, or push an arena image. The next
-  release action is an explicit Day-1 build followed by the exact-image checker and a
-  separately requested registry push.
+- Build-session baseline `e462e12` produced local AMD64 Day-2 image
+  `sha256:b2230fa5473dcb09af891e9c07d9a3e4b13be5406f995a9795383392115bdd6f`
+  from official base `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
+  The checker passed 6/6 checks with the expected root/no-token warnings; Day-1 secrets
+  and validation selector were absent. This is a local rollback identity, not a release.
+- Frozen gateway candidate `c03f0bb` produced local AMD64 Day-2 image
+  `sha256:0bc8f980859e3367dc78e5c977016bf2059bf5fc53c03c004bb60cbc0143a074`.
+  Its checker passed 6/6 with the same expected warnings; an in-image Python 3.12 import
+  of `ModelGateway` and `BudgetLedger` passed. The candidate suite passed 235 tests on
+  macOS with 19 Linux-only skips. A later documentation-only evidence commit does not
+  alter any path copied by the Dockerfile.
 - Baseline: 199 offline tests passed on macOS; 19 Linux-only checks skipped.
   Changed-source suite: **216 passed on Linux AMD64/Python 3.12**, zero skips;
   macOS: 216 discovered, 19 Linux-only skips, zero failures. Compilation, shell syntax,
@@ -68,13 +77,13 @@ unchanged. A 21 Sep ~21:29 SGT public-board refresh still showed 5/15, VALID/SCO
 The ordered technical gates below remain the starting baseline; the build session
 may resequence them using the brief and measured evidence.
 
-1. **Establish the runnable baseline.** Verify the existing private setup, inspect the
-   fresh base contract/source and build/check this source. Done when digest, source SHA,
-   architecture, structural check and exact runtime config behavior are recorded.
+1. **Merge and wire model admission.** The gateway/ledger foundation is deliberately
+   unconnected. Bind it only through the inspected trusted challenge hook; preserve the
+   inherited instance lifecycle, submission callback and sole results writer.
 2. **Prove solving.** Use one explicitly selected practice challenge via `scripts/arena.py`
    or local Codex practice. Record accepted outcome, elapsed time and model/tool usage
    privately; report sanitized counts. Local/manual solves do not prove arena VALID.
-3. **Close the production integration gap.** Choose a trusted structured scope handoff;
+3. **Close the remaining production integration gap.** Use the trusted structured scope handoff;
    wire one attempt through real tools, evidence qualification, durable intents and
    inherited result output. Done when success, wrong candidate, ambiguous submission,
    timeout, cancellation and instance cleanup pass end-to-end with real adapters.
