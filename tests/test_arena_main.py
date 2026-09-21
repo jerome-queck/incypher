@@ -541,56 +541,110 @@ class ArenaSelectionTests(unittest.TestCase):
         self.assertIs(solver.build_prompt, original_builder)
         self.assertIs(solver.run_bash, original_shell)
 
-    def test_empty_and_all_solved_catalogues_run_official_main_once(self):
-        for challenges, expected_solves in (([], 0), ([{
+    def test_all_solved_catalogue_runs_official_main_once(self):
+        challenges = [{
             "id": 1, "name": "solved", "category": "misc", "type": "standard",
             "points": 100, "solved": True, "files": [],
-        }], 0)):
-            with self.subTest(challenges=bool(challenges)):
-                official = ModuleType("main")
-                solver = ModuleType("terminal_catalogue_solver")
-                solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
-                solver.run_bash = lambda cmd: "unused"
-                solves = []
+        }]
+        official = ModuleType("main")
+        solver = ModuleType("terminal_catalogue_solver")
+        solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
+        solver.run_bash = lambda cmd: "unused"
+        solves = []
 
-                def solve_challenge(client, ch, max_steps):
-                    solves.append(ch["id"])
-                    return {"solved": True, "model_calls": 1, "tool_calls": 0}
+        def solve_challenge(client, ch, max_steps):
+            solves.append(ch["id"])
+            return {"solved": True, "model_calls": 1, "tool_calls": 0}
 
-                solve_challenge.__module__ = "terminal_catalogue_solver"
-                official.solve_challenge = solve_challenge
-                official.is_practice = lambda ch: False
+        solve_challenge.__module__ = "terminal_catalogue_solver"
+        official.solve_challenge = solve_challenge
+        official.is_practice = lambda ch: False
 
-                class Client:
-                    def __init__(self, base, token):
-                        pass
+        class Client:
+            def __init__(self, base, token):
+                pass
 
-                    def list_challenges(self):
-                        return challenges
+            def list_challenges(self):
+                return challenges
 
-                    def challenge(self, cid):
-                        return dict(challenges[0])
+            def challenge(self, cid):
+                return dict(challenges[0])
 
-                official.CTFdClient = Client
-                main_calls = []
+        official.CTFdClient = Client
+        main_calls = []
 
-                def inherited_main():
-                    main_calls.append(1)
-                    client = official.CTFdClient("base", "token")
-                    for brief in client.list_challenges():
-                        official.solve_challenge(client, client.challenge(brief["id"]), 4)
-                    return 0
+        def inherited_main():
+            main_calls.append(1)
+            client = official.CTFdClient("base", "token")
+            for brief in client.list_challenges():
+                official.solve_challenge(client, client.challenge(brief["id"]), 4)
+            return 0
 
-                official.main = inherited_main
-                with tempfile.TemporaryDirectory() as directory, patch.dict(
-                    sys.modules, {
-                        "main": official,
-                        "terminal_catalogue_solver": solver,
-                    }
-                ), patch.dict(os.environ, {
-                    "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
-                }, clear=True):
-                    self.assertEqual(arena_main.main(), 0)
+        official.main = inherited_main
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {
+                "main": official,
+                "terminal_catalogue_solver": solver,
+            }
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True):
+            self.assertEqual(arena_main.main(), 0)
 
-                self.assertEqual(main_calls, [1])
-                self.assertEqual(len(solves), expected_solves)
+        self.assertEqual(main_calls, [1])
+        self.assertEqual(solves, [])
+
+    def test_empty_catalogue_is_retried_until_work_arrives(self):
+        challenge = {
+            "id": 1, "name": "arrived", "category": "misc", "type": "standard",
+            "points": 100, "solved": False, "files": [],
+        }
+        official = ModuleType("main")
+        solver = ModuleType("recovering_catalogue_solver")
+        solver.build_prompt = lambda ch, cdir, filenames, conn: "synthetic"
+        solver.run_bash = lambda cmd: "unused"
+        attempts = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempts.append(ch["id"])
+            return {"solved": True, "model_calls": 1, "tool_calls": 0}
+
+        solve_challenge.__module__ = "recovering_catalogue_solver"
+        official.solve_challenge = solve_challenge
+        official.is_practice = lambda ch: False
+
+        class Client:
+            def __init__(self, base, token):
+                pass
+
+            def list_challenges(self):
+                return [challenge]
+
+            def challenge(self, cid):
+                return dict(challenge)
+
+        official.CTFdClient = Client
+        main_calls = []
+
+        def inherited_main():
+            main_calls.append(1)
+            if len(main_calls) == 1:
+                return 0
+            client = official.CTFdClient("base", "token")
+            for brief in client.list_challenges():
+                official.solve_challenge(client, client.challenge(brief["id"]), 4)
+            return 0
+
+        official.main = inherited_main
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {
+                "main": official,
+                "recovering_catalogue_solver": solver,
+            }
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True), patch("arena_main.time.sleep"):
+            self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(main_calls, [1, 1])
+        self.assertEqual(attempts, [1])

@@ -49,6 +49,7 @@ _OFFICIAL_AST = {
 _MAX_SLICE_MODEL_CALLS = 150
 _MAX_RUN_SECONDS = 24 * 60 * 60
 _PASS_COOLDOWN_SECONDS = 2.0
+_PASS_RECOVERY_SECONDS = 30.0
 _CATALOGUE_REFRESH_SECONDS = 300.0
 
 
@@ -413,7 +414,9 @@ class _OuterCoordinator:
     def should_continue(self) -> bool:
         if self.stop_reason is not None:
             return False
-        if self.pass_calls == 0 or self.pass_slices == 0 or self.pass_all_solved:
+        if self.pass_calls == 0:
+            return time.monotonic() + _PASS_RECOVERY_SECONDS < self.deadline
+        if self.pass_slices == 0 or self.pass_all_solved:
             return False
         return time.monotonic() + _PASS_COOLDOWN_SECONDS < self.deadline
 
@@ -469,6 +472,7 @@ def main():
     state = RuntimeState(os.environ.get("RUNTIME_STATE_PATH", "/work/runtime-state.sqlite3"))
     admission = Admission(Capacity(512 * 1024 * 1024, 64, active=2, heavy=1, queued=8))
     validation_selector = os.path.isfile("/opt/agent/.validation-id")
+    explicit_selector = validation_selector or bool(os.environ.get("ONLY_IDS", "").strip())
     coordinator = _OuterCoordinator()
     catalogue = _CatalogueCache()
 
@@ -584,9 +588,18 @@ def main():
         while True:
             coordinator.begin_pass()
             return_code = official_main.main()
-            if return_code not in (None, 0) or not coordinator.should_continue():
+            if return_code not in (None, 0):
                 return return_code
-            time.sleep(_PASS_COOLDOWN_SECONDS)
+            if explicit_selector and coordinator.pass_calls == 0:
+                return return_code
+            if not coordinator.should_continue():
+                return return_code
+            delay = (
+                _PASS_RECOVERY_SECONDS
+                if coordinator.pass_calls == 0
+                else _PASS_COOLDOWN_SECONDS
+            )
+            time.sleep(delay)
     finally:
         official_main.is_practice = inherited_is_practice
         official_main.CTFdClient = inherited_client
