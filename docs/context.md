@@ -56,7 +56,19 @@ raw provider exception text leaking into results. The optional bridge retains it
 
 ## Next work, in order
 
-1. **Establish the runnable baseline.** Fill `.env`, authenticate registry, inspect the
+The user has requested an overnight capability build. Start from the
+[build brief](solver-build/brief.md) and its [launch prompt](solver-build/prompt.md).
+The brief owns this session's goals, deadlines, delegation and Day-1 release authority;
+its research records the audited starting gaps. Private progress lives under ignored
+`private/solver-build-20260921/`. Architecture and PR ordering remain build-session
+decisions. The prompt-authoring pass changed documentation only; solver readiness is
+unchanged. A 21 Sep ~21:29 SGT public-board refresh still showed 5/15, VALID/SCORE 650,
+12 pushes, `done`, penalty 0. No paid request or arena release was made by that pass.
+
+The ordered technical gates below remain the starting baseline; the build session
+may resequence them using the brief and measured evidence.
+
+1. **Establish the runnable baseline.** Verify the existing private setup, inspect the
    fresh base contract/source and build/check this source. Done when digest, source SHA,
    architecture, structural check and exact runtime config behavior are recorded.
 2. **Prove solving.** Use one explicitly selected practice challenge via `scripts/arena.py`
