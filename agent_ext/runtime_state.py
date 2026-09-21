@@ -586,11 +586,12 @@ class RuntimeState:
             with closing(self._connect()) as connection:
                 row = connection.execute(
                     """SELECT 1 FROM runtime_submission_intents
-                       WHERE scope_key = ? AND status IN (
-                           'dispatch_possible', 'uncertain', 'accepted',
-                           'already_solved', 'unavailable', 'conflict'
-                       ) LIMIT 1""",
-                    (scope.key,),
+                       WHERE (scope_key = ? AND status IN (
+                           'dispatch_possible', 'uncertain', 'unavailable'
+                       )) OR (challenge_id = ? AND status IN (
+                           'accepted', 'already_solved', 'conflict'
+                       )) LIMIT 1""",
+                    (scope.key, scope.challenge_id),
                 ).fetchone()
         except sqlite3.Error as exc:
             raise RuntimeStateError("submission reconciliation read failed") from exc
@@ -616,11 +617,12 @@ class RuntimeState:
                 fingerprint = self._submission_fingerprint(connection, scope, candidate)
                 blocked = connection.execute(
                     """SELECT 1 FROM runtime_submission_intents
-                       WHERE scope_key = ? AND status IN (
-                           'dispatch_possible', 'uncertain', 'accepted',
-                           'already_solved', 'unavailable', 'conflict'
-                       ) LIMIT 1""",
-                    (scope.key,),
+                       WHERE (scope_key = ? AND status IN (
+                           'dispatch_possible', 'uncertain', 'unavailable'
+                       )) OR (challenge_id = ? AND status IN (
+                           'accepted', 'already_solved', 'conflict'
+                       )) LIMIT 1""",
+                    (scope.key, scope.challenge_id),
                 ).fetchone()
                 if blocked is not None:
                     self._rollback(connection)

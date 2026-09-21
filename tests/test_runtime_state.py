@@ -383,6 +383,9 @@ class RuntimeStateTests(unittest.TestCase):
 
     def test_terminal_submission_replay_is_idempotent_and_conflict_is_durable(self):
         context = self.finding_context(self.static)
+        replacement = self.finding_context(
+            Scope(7, "replacement-material", ChallengeKind.DYNAMIC, "new-instance")
+        )
         candidate = "INCYPHER{accepted-before-checkpoint}"
         self.assertEqual(
             self.store.reserve_submission(context, candidate, now=10), "reserved"
@@ -393,6 +396,11 @@ class RuntimeStateTests(unittest.TestCase):
         self.store.reconcile_submission(context, candidate, "correct", now=12)
         self.store.reconcile_submission(context, candidate, "correct", now=13)
         self.assertFalse(self.store.submission_reconciled(context))
+        self.assertFalse(self.store.submission_reconciled(replacement))
+        self.assertEqual(
+            self.store.reserve_submission(replacement, "INCYPHER{different}", now=13),
+            "blocked",
+        )
 
         self.store.reconcile_submission(context, candidate, "incorrect", now=14)
         self.store.reconcile_submission_catalogue(
@@ -400,12 +408,39 @@ class RuntimeStateTests(unittest.TestCase):
             now=1000,
         )
         self.assertFalse(self.store.submission_reconciled(context))
+        self.assertFalse(self.store.submission_reconciled(replacement))
 
         self.store.reconcile_submission_catalogue(
             [{"id": 7, "points": 100, "type": "standard", "solved": True}],
             now=1001,
         )
         self.assertTrue(self.store.submission_reconciled(context))
+        self.assertTrue(self.store.submission_reconciled(replacement))
+
+    def test_already_solved_blocks_replacement_scope_until_catalogue_confirms(self):
+        context = self.finding_context(self.static)
+        replacement = self.finding_context(
+            Scope(7, "replacement-material", ChallengeKind.DYNAMIC, "new-instance")
+        )
+        candidate = "INCYPHER{account-terminal}"
+        self.assertEqual(
+            self.store.reserve_submission(context, candidate, now=10), "reserved"
+        )
+        self.assertTrue(
+            self.store.mark_submission_dispatch_possible(context, candidate, now=11)
+        )
+        self.store.reconcile_submission(context, candidate, "already_solved", now=12)
+
+        self.assertFalse(self.store.submission_reconciled(replacement))
+        self.assertEqual(
+            self.store.reserve_submission(replacement, "INCYPHER{different}", now=13),
+            "blocked",
+        )
+        self.store.reconcile_submission_catalogue(
+            [{"id": 7, "points": 100, "type": "standard", "solved": True}],
+            now=14,
+        )
+        self.assertTrue(self.store.submission_reconciled(replacement))
 
     def test_submission_reservation_commit_failure_fails_before_dispatch(self):
         def fail(operation):
