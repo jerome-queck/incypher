@@ -10,7 +10,7 @@ from agent_ext.managed_shell import ManagedShell
 class ManagedShellTests(unittest.TestCase):
     def shell(self, **kwargs):
         return ManagedShell("scope", time.monotonic() + 10, ordinary_seconds=1,
-                            heavy_seconds=1, output_bytes=1024, **kwargs)
+                            heavy_seconds=1, output_bytes=1024, cwd="/tmp", **kwargs)
 
     def test_sync_output_and_environment_are_bounded(self):
         shell = self.shell()
@@ -34,7 +34,7 @@ class ManagedShellTests(unittest.TestCase):
 
     def test_timeout_kills_descendant_process_group(self):
         shell = ManagedShell("scope", time.monotonic() + 10, ordinary_seconds=0.15,
-                             heavy_seconds=0.15, output_bytes=1024)
+                             heavy_seconds=0.15, output_bytes=1024, cwd="/tmp")
         try:
             result = shell("sleep 30 & echo $!; wait")
         finally:
