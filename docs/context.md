@@ -15,10 +15,10 @@ were merged. No open PR contained the requested general practice-selection chang
 
 | Path | Actual status | Consequence |
 | --- | --- | --- |
-| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; practice filter disabled by a narrow wrapper | Official selection (`ONLY_IDS`), solving, instance lifecycle and results remain inherited |
+| `entrypoint.sh` → `arena_main.py` → inherited `main.py` | Active; practice selection and trusted per-challenge context wrappers | Official selection (`ONLY_IDS`), solving, instance lifecycle and results remain inherited; signature drift fails closed |
 | `validation_main.py` | Optional single-ID build mode; shares normal wrapper | Omit validation selector in competition image |
-| `brain.py`, `agent_ext/adapters.py` | Active synchronous Chat Completions loop | Shell + submit tools; no category skills, memory, cost ledger or scheduler wired in |
-| `agent_ext/model_gateway.py` | Reviewed foundation; not connected to Brain | Exact injected identity, capability-gated options and durable cost reservations exist; production discovery/admission/wiring remain open |
+| `brain.py`, `agent_ext/adapters.py` | Active bounded Chat Completions loop | Exact model gateway, point-based call caps, tool/submission caps, 48 KiB context and deterministic category playbook; shell remains synchronous |
+| `agent_ext/model_gateway.py`, `provider_discovery.py` | Active in Brain | Exact identity, OpenRouter capability/pricing discovery, high reasoning when supported and durable conservative ledger; opaque pricing remains unknown |
 | `controller.py`, `scheduler.py`, `retry_policy.py`, `strategy_bridge.py` | Merged; offline tested; unconnected to normal construction | No production scheduling, global budget or autonomous retry guarantee |
 | `resources.py`, `tools/` | Merged fixed local inspections | Not a bounded replacement for arbitrary shell; not invoked by normal Brain |
 | `memory.py`, `verification.py`, `submission_state.py`, `results.py` | Merged evidence/SQLite helpers | Production callbacks and official result mapping remain unconnected |
@@ -77,9 +77,9 @@ unchanged. A 21 Sep ~21:29 SGT public-board refresh still showed 5/15, VALID/SCO
 The ordered technical gates below remain the starting baseline; the build session
 may resequence them using the brief and measured evidence.
 
-1. **Merge and wire model admission.** The gateway/ledger foundation is deliberately
-   unconnected. Bind it only through the inspected trusted challenge hook; preserve the
-   inherited instance lifecycle, submission callback and sole results writer.
+1. **Validate the integrated model path.** Run a non-submitting exact-image Luna/high
+   fixture, then one readiness-gated fresh-material practice validation. Confirm ledger,
+   context bounds, trusted scope and inherited cleanup/results behavior.
 2. **Prove solving.** Use one explicitly selected practice challenge via `scripts/arena.py`
    or local Codex practice. Record accepted outcome, elapsed time and model/tool usage
    privately; report sanitized counts. Local/manual solves do not prove arena VALID.

@@ -2,10 +2,12 @@ import contextlib
 import io
 import json
 import os
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 import brain
+from agent_ext.runtime_context import trusted_attempt
 
 
 class ScriptedBrain(brain.Brain):
@@ -23,6 +25,98 @@ class FailingBrain(brain.Brain):
 
 
 class BrainTests(unittest.TestCase):
+    def test_trusted_points_bound_model_steps(self):
+        challenge = {
+            "id": 1, "name": "small", "category": "crypto", "type": "standard",
+            "points": 100, "files": [],
+        }
+        with trusted_attempt(challenge):
+            agent = brain.Brain(Mock(), Mock(), max_steps=40, verbose=False)
+        self.assertEqual(agent.max_steps, 4)
+
+    def test_production_chat_discovers_high_reasoning_and_settles_budget(self):
+        class Response:
+            def __init__(self, payload):
+                self.content = json.dumps(payload).encode()
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.posts = []
+
+            def get(self, url, timeout):
+                return Response({"data": [{
+                    "id": "openai/test-model",
+                    "supported_parameters": [
+                        "reasoning", "tools", "tool_choice", "max_completion_tokens",
+                    ],
+                    "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                }]})
+
+            def post(self, endpoint, headers, data, timeout):
+                self.posts.append((endpoint, headers, json.loads(data), timeout))
+                return Response({
+                    "model": "openai/test-model",
+                    "choices": [{"message": {"role": "assistant", "content": "done"}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "cost": "0.01"},
+                })
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+            "LLM_MODEL": "openai/test-model",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            "MODEL_BUDGET_USD": "85",
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = Session()
+            message = agent._chat([{"role": "user", "content": "test"}])
+            snapshot = agent._ledger.snapshot()
+
+        self.assertEqual(message["content"], "done")
+        request = agent.s.posts[0][2]
+        self.assertEqual(request["model"], "openai/test-model")
+        self.assertEqual(request["reasoning"], {"effort": "high"})
+        self.assertIn("tools", request)
+        self.assertEqual(request["tool_choice"], "auto")
+        self.assertEqual(request["max_completion_tokens"], 4096)
+        self.assertNotIn("temperature", request)
+        self.assertEqual(snapshot.measured_cost, brain.Decimal("0.01"))
+        self.assertEqual(snapshot.unresolved_cost, brain.Decimal(0))
+
+    def test_observed_model_substitution_is_terminal_after_accounting(self):
+        class Response:
+            def __init__(self, payload):
+                self.content = json.dumps(payload).encode()
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def get(self, url, timeout):
+                return Response({"data": []})
+
+            def post(self, endpoint, headers, data, timeout):
+                return Response({
+                    "model": "other/model",
+                    "choices": [{"message": {"role": "assistant", "content": "wrong"}}],
+                    "usage": {"cost": "0.02"},
+                })
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "LLM_BASE_URL": "https://opaque.invalid/v1",
+            "LLM_MODEL": "required/model",
+            "LLM_API_KEY": "secret",
+            "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+        }, clear=True):
+            agent = brain.Brain(Mock(), Mock(), verbose=False)
+            agent.s = Session()
+            with self.assertRaisesRegex(Exception, "unexpected model identity"):
+                agent._chat([{"role": "user", "content": "test"}])
+            self.assertEqual(agent._ledger.snapshot().measured_cost, brain.Decimal("0.02"))
+
     def test_full_lifecycle_runs_command_then_submits(self):
         candidate = "INCYPHER" + "{synthetic-lifecycle}"
         replies = [
@@ -99,6 +193,18 @@ class BrainTests(unittest.TestCase):
         self.assertFalse(result["solved"])
         self.assertEqual(result["error"], "submission budget exhausted")
         self.assertEqual(len(submitted), 3)
+
+    def test_tool_call_budget_is_terminal(self):
+        replies = [{"content": "", "tool_calls": [{"id": str(index), "function": {
+            "name": "run_bash", "arguments": json.dumps({"command": f"echo {index}"})
+        }}]} for index in range(2)]
+        agent = ScriptedBrain(
+            replies, run_bash=Mock(return_value="ok"), submit_flag=Mock(), verbose=False
+        )
+        agent.max_tool_calls = 1
+        result = agent.solve("sample")
+        self.assertEqual(result["error"], "tool call budget exhausted")
+        self.assertEqual(agent.run_bash.call_count, 1)
 
     def test_rate_limit_is_terminal_and_not_retried(self):
         candidate = "INCYPHER" + "{rate-limit-test}"

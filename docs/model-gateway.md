@@ -1,9 +1,9 @@
 # Model gateway foundation
 
-`agent_ext/model_gateway.py` is an unconnected foundation; the inherited Brain remains
-the production model caller. Integration must pass the exact trusted, runtime-injected
-endpoint, credential and model identity. Credentials stay in memory and are excluded
-from representations, errors and ledger storage.
+`agent_ext/model_gateway.py` is the production Brain's model-call and cost-admission
+boundary. Brain passes the exact trusted, runtime-injected endpoint, credential and model
+identity. Credentials stay in memory and are excluded from representations, errors and
+ledger storage. The inherited harness still owns challenge lifecycle and official results.
 
 Optional request fields are allow-listed by an explicit `ProviderCapabilities` value.
 Opaque providers therefore receive only `model` and `messages`. A provider known to
@@ -32,11 +32,19 @@ never-dispatched path. Records have a configured hard count limit and are retain
 reconciliation, so capacity requires operator handling rather than unsafe pruning.
 The total limit is stored with the ledger and a restart using a different limit fails.
 
-Limits: this PR does not discover capabilities, pricing or provider meters; estimate
-cost; reconcile generation IDs; retry; encrypt its local SQLite file; or wire Brain.
-Callers must keep the ledger in ignored private runtime storage and choose conservative
-reservation bounds. A late measured cost may exceed its reservation and exhaust the
-ledger; it is recorded rather than hidden.
+Brain uses [provider discovery](provider-discovery.md) for the exact OpenRouter catalogue;
+opaque providers retain the compatible tool fields but receive no inferred reasoning or
+temperature. Known catalogue prices provide conservative estimates; response usage wins
+when measured. The durable ledger defaults to `/work/model-budget.sqlite3`, an USD 85
+admission ceiling and USD 1 opaque-price reservations, leaving USD 15 of the competition
+allowance unadmitted for recovery/verification. Optional environment tuning is bounded;
+Day 2 still requires only the organiser's injected model triplet.
+
+Limits: there is no generic provider meter or generation-ID reconciliation in the image;
+the SQLite file is not encrypted; a timed-out transport thread cannot be forcibly killed;
+and a missing usage record remains fully reserved. A late measured cost may exceed its
+reservation and exhaust the ledger; it is recorded rather than hidden. Scheduling and
+cross-attempt recovery remain separate work.
 
 All monetary decimals are nonnegative and bounded to 64 serialized characters, 28
 significant digits, and an exponent from -18 through 18. Out-of-bound provider costs

@@ -77,15 +77,17 @@ class ProviderIdentity:
 class ProviderCapabilities:
     """Optional request keys explicitly known to be supported.
 
-    Recognized keys are ``temperature``, ``max_tokens``, ``reasoning`` (an
-    OpenRouter-compatible object), and ``reasoning_effort`` (a scalar effort).
-    Unknown keys are rejected rather than forwarded.
+    Unknown keys are rejected rather than forwarded. Tool fields are explicit
+    capabilities too: an opaque endpoint receives no optional tool schema.
     """
 
     optional_parameters: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        allowed = {"temperature", "max_tokens", "reasoning", "reasoning_effort"}
+        allowed = {
+            "temperature", "max_tokens", "max_completion_tokens", "reasoning",
+            "reasoning_effort", "tools", "tool_choice",
+        }
         if not isinstance(self.optional_parameters, frozenset):
             object.__setattr__(self, "optional_parameters", frozenset(self.optional_parameters))
         if not self.optional_parameters <= allowed:
@@ -146,6 +148,9 @@ def build_request(
     messages: Sequence[Mapping[str, Any]],
     capabilities: ProviderCapabilities,
     options: RequestOptions = RequestOptions(),
+    *,
+    tools: Sequence[Mapping[str, Any]] | None = None,
+    tool_choice: str | None = None,
 ) -> dict[str, Any]:
     """Build a request without changing the injected model identity."""
     if not isinstance(identity, ProviderIdentity):
@@ -164,13 +169,29 @@ def build_request(
     supported = capabilities.optional_parameters
     if options.temperature is not None and "temperature" in supported:
         payload["temperature"] = options.temperature
-    if options.max_tokens is not None and "max_tokens" in supported:
-        payload["max_tokens"] = options.max_tokens
+    if options.max_tokens is not None:
+        if "max_completion_tokens" in supported:
+            payload["max_completion_tokens"] = options.max_tokens
+        elif "max_tokens" in supported:
+            payload["max_tokens"] = options.max_tokens
     if options.reasoning_effort is not None:
         if "reasoning" in supported:
             payload["reasoning"] = {"effort": options.reasoning_effort}
         elif "reasoning_effort" in supported:
             payload["reasoning_effort"] = options.reasoning_effort
+    if tools is not None and "tools" in supported:
+        if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes)):
+            raise ValueError("tools must be a sequence")
+        normalized_tools = []
+        for tool in tools:
+            if not isinstance(tool, Mapping):
+                raise ValueError("each tool must be an object")
+            normalized_tools.append(dict(tool))
+        payload["tools"] = normalized_tools
+    if tool_choice is not None and "tool_choice" in supported:
+        if not isinstance(tool_choice, str) or not tool_choice:
+            raise ValueError("tool_choice must be nonempty")
+        payload["tool_choice"] = tool_choice
     return payload
 
 
@@ -279,9 +300,14 @@ class ModelGateway:
         capabilities: ProviderCapabilities,
         options: RequestOptions = RequestOptions(),
         *,
+        tools: Sequence[Mapping[str, Any]] | None = None,
+        tool_choice: str | None = None,
         estimated_cost: Decimal | str | None = None,
     ) -> ModelResponse:
-        payload = build_request(identity, messages, capabilities, options)
+        payload = build_request(
+            identity, messages, capabilities, options,
+            tools=tools, tool_choice=tool_choice,
+        )
         try:
             body = json.dumps(
                 payload,
