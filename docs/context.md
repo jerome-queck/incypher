@@ -1,12 +1,27 @@
 # Repository context
 
-Updated 22 September 2026. Read this first on a new task, after compaction, or before
+Updated 22 September 2026 at 19:24 SGT. Read this first on a new task, after compaction, or before
 assigning a bounded subtask. Rules live in [competition-rules.md](competition-rules.md);
 machine commands live in [setup.md](setup.md).
 
 ## Current release and next action
 
-Post-competition update at 18:17 SGT: Git `main` now contains the scored-run
+Post-competition endurance audit at 19:24 SGT: exact #35 and #34 images each
+solved the same five archived file-only challenges (#55–59) through a real
+OpenRouter model, managed shell and local answer checker. #35 made 57 attempted
+model turns across nine slices, including two later slices on unresolved #4/#13;
+its $0.60 test ledger settled $0.49343848 with no unresolved cost. #13's
+second slice used all 16 turns without a candidate; #4's attempts were cut
+short by the imposed test budget. #34 made 35 attempted turns across six slices,
+solved the same five, and hit its separate budget gate on #13. The
+[scoring handoff](scoring-postmortem-handoff-2026-09-22.md#local-real-model-endurance-replay-1924-sgt)
+has the exact limits and sanitized evidence locations. **Next action:** obtain
+arena-owned #34/#35 logs, outcomes and consistent state/ledger backups to
+attribute missed scored solves; use a controlled matched replay to test any
+specific proposed fix. Local file replay does not test live services or arena
+scoring.
+
+Earlier post-competition update at 18:17 SGT: Git `main` now contains the scored-run
 solver source at `fefe49b`; CI passed. No new arena image was pushed. The public
 board ended at six solves, 750 VALID, 200 penalty and 550 NET; push #35 stopped
 when the competition closed. The [scoring handoff](scoring-postmortem-handoff-2026-09-22.md)

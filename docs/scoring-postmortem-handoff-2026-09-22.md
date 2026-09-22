@@ -42,8 +42,8 @@ verdict or active-image trace.
 | Earlier fresh-first scheduling could bury a promising retry. | The recorded local catalogue replay ranked Vault #95's second slice 42nd after one miss. First looks had 12 or 16 model turns and an eight-minute ceiling. See [release diagnosis](context.md#previous-challenge-preparation-diagnosis) and [current slice policy](../arena_main.py). | A concrete opportunity cost under a finite event window, not proof of which live attempts ran. #35 promoted proven high-value work and selected Relay #96 at about 16:00, but the board showed no later solve. |
 | Several shell and progress defects remain in #34/#35. | Exact-image synthetic probes reproduced a blocked re-read after a generated file changed, deduplication of a command refused before execution, a 12 KB output kill, and nonzero error results counted as progress. See [wrapper](../arena_main.py), [state](../agent_ext/runtime_state.py) and [shell](../agent_ext/managed_shell.py). | These can waste attempts or prevent recovery. No final-run command trace ties one to a specific missed challenge. #34/#35's [private output vault](../agent_ext/output_vault.py) restores bounded prior outputs but does not fix changed-input deduplication. |
 | Some semantic findings remain unrecordable. | The [finding validator](../agent_ext/runtime_context.py) rejects benign authentication, socket-framing and long numeric examples in synthetic probes. | Possible loss of useful cross-slice state. #34/#35 already transfer validated cross-instance semantic findings, so the older blanket claim that all such state disappears is obsolete. |
-| Unknown model cost can stop the whole coordinator. | With no catalogue price or response cost, [policy](../brain.py) reserves $1 per call; the [ledger](../agent_ext/model_gateway.py) retains 85 unknown-cost reservations and refuses call 86 in an offline probe. | A conditional stop mechanism. Actual #35 price responses, provider spend and ledger are unavailable, so this is **not** an established scored-run cause. |
-| Most packaged methods were unproven in the arena. | The [reference index](../challenge_reference/README.md) lists 47 method entries but only 13 local proofs; many others are hypotheses. | Packaged coverage and structural checks cannot establish reliable solutions for the other challenges. No matched real-model replay measured their solve rate. |
+| Unknown model cost can stop the whole coordinator. | With no catalogue price or response cost, [policy](../brain.py) reserves $1 per call; the [ledger](../agent_ext/model_gateway.py) retains 85 unknown-cost reservations and refuses call 86 in an offline probe. | A conditional stop mechanism. Arena #35 price responses, provider spend and ledger are unavailable, so this is **not** an established scored-run cause. |
+| Most packaged methods were unproven in the arena. | The [reference index](../challenge_reference/README.md) lists 47 method entries but only 13 local proofs; many others are hypotheses. The real-model replay below covers five known solved file challenges and two unresolved file challenges, not the full catalogue. | Packaged coverage and structural checks cannot establish reliable solutions for the other challenges. |
 
 The generic `flag{...}` wording in one challenge description is not an
 established bug: the [official guide](https://hackathon.in-cypher.com/how-to-play)
@@ -52,6 +52,43 @@ snapshot test failed intermittently in the supplied postmortem's WSL run but
 passed 12/12 in the #35 Linux image here; that worker is outside the active
 managed-shell path. There is no evidence that the arena's 2 GB limit killed the
 solver. Pushes #31 and #33 exited with code 1, but their causes remain unknown.
+
+## Local real-model endurance replay, 19:24 SGT
+
+Using the personal OpenRouter key, an isolated AMD64 Docker runner exercised the
+packaged `Brain`, scoped managed shell, persistent runtime state, model ledger,
+answer callback and later-slice memory under the arena's 2 CPU/2 GiB/256 PID,
+read-only-root limits. It mounted only archived file attachments for each case;
+answer candidates and challenge details were streamed into the evaluator, never
+mounted for the shell. There was no CTF platform call, dynamic instance, arena
+submission or registry push. Sanitized private results are in ignored local
+`private/real-model-audit-20260922/full-file-work-v2/` and
+`private/real-model-audit-20260922/full-file-baseline/`.
+
+| Exact image | Archived known file challenges #55–59 | Harder file replay | Model turns / measured cost |
+| --- | --- | --- | --- |
+| #35 `8896c31d…` | **5/5 correct local answers**, one submission each; 24 model and 23 tool calls | #4: 10-turn first slice, then 2-turn retry; it submitted one candidate, but the local callback had no true answer and rejected every candidate. #13: 5-turn first slice, then full 16-turn/17-tool retry without a candidate. | 57 attempted model turns across nine slices, 54 settled calls, **$0.49343848** measured, $0 estimated/unresolved; ~430 seconds of solver time. |
+| #34 `93443207…` | **5/5 correct local answers**, one submission each; 26 model and 26 tool calls | #13: 9 attempted turns, no candidate. This is not a matched hard-case comparison because #35 ran #4 first and later retried #13. | 35 attempted model turns across six slices, **$0.4486036** measured, $0 estimated/unresolved; ~351 seconds of solver time. |
+
+The replay used a **$0.60 ledger cap per image**. On #35, #4 and the first
+#13 slice stopped when the next reservation would exceed remaining headroom;
+#4's retry did the same. On #34, #13 stopped for that reason. These are imposed
+test-budget stops, not evidence of arena budget exhaustion. #35's second #13
+slice used its full 16-turn limit without a submission. Its 16 retained memory
+records and 17 tool calls show sustained work, not a solve. The earlier
+file-backed analysis found the eight supplied XOR samples insufficient to
+verify a simple generator; this replay did not resolve that ambiguity.
+
+The first replay setup failed before model work because its reserve was below
+the image's accepted minimum. After that correction, one model request failed
+because the local Colima DNS resolver was unavailable and left an unresolved
+$0.05 reservation. A fresh isolated replay pinned the provider's current
+host resolution and completed with **zero** unresolved cost. This is a local
+runner fault; no arena DNS inference follows. Both images solved all five
+known tasks, so this small replay does not show a solve-rate improvement from
+#34 to #35. The replay directly invokes `Brain` with trusted local contexts;
+it does not test inherited CTF enumeration, live instance lifecycles or the
+arena results writer.
 
 ## Unresolved evidence
 
@@ -67,8 +104,9 @@ failures, slice exhaustion, candidate quality or instance lifetime dominated.
   **6 passed, 0 failed, 2 expected warnings**. All 31 checked code/reference files
   matched the checked-out runtime; Git `main` CI for `fefe49b` passed. Synthetic
   probes ran on the exact #35 image and the prior `933c1e8` baseline.
-- Not run: autonomous real-model challenge replay or inspection of actual arena
-  run logs and ledgers. A checker pass and synthetic success are not fresh score.
+- Ran: bounded real-model replay of archived file challenges on exact #34/#35
+  images, as detailed above. Not run: live arena harness/instance replay or
+  inspection of actual arena logs and ledgers. Local correctness is not fresh score.
 - Next: obtain sanitized #34/#35 per-challenge outcomes and stdout/stderr,
   consistent read-only copies of `runtime-state.sqlite3` and
   `model-budget.sqlite3` including WAL state, and actual model usage metadata.
