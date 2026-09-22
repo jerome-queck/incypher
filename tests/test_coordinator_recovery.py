@@ -168,6 +168,35 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         self.assertEqual(_FakeManagedShell.instances[0].commands, ["inspect material"])
         self.assertTrue(_FakeManagedShell.instances[0].closed)
 
+    def test_prior_slices_reach_brain_scope_after_outer_restart(self):
+        challenge = {
+            "id": 78, "name": "hard synthetic", "category": "crypto",
+            "type": "standard", "value": 200, "files": [],
+        }
+        observed = []
+
+        def solve_challenge(client, ch, max_steps):
+            observed.append(current_attempt(required=True).prior_attempts)
+            return {"solved": False, "steps": 0, "model_calls": 0, "tool_calls": 0}
+
+        official, solver = self._harness(
+            [challenge], solve_challenge, "multimodel_attempt_scope_solver"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(sys.modules, {
+                "main": official,
+                "multimodel_attempt_scope_solver": solver,
+                }),
+                patch.dict(os.environ, {
+                    "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                }, clear=True),
+                patch.object(arena_main._OuterCoordinator, "should_continue", return_value=False),
+            ):
+                for _ in range(3):
+                    self.assertEqual(arena_main.main(), 0)
+        self.assertEqual(observed, [0, 1, 2])
+
     def test_crash_checkpoint_reorders_the_next_same_run_pass(self):
         challenges = [
             {

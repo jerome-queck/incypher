@@ -147,6 +147,7 @@ class AttemptContext:
     material_ref: str
     attempt_id: str
     deadline_monotonic: float
+    prior_attempts: int = 0
     instance_generation: str | None = None
     file_count: int = 0
     redaction_values: tuple[str, ...] = field(default=(), repr=False, compare=False)
@@ -156,6 +157,8 @@ class AttemptContext:
             raise ValueError("trusted challenge ID must be positive")
         if type(self.points) is not int or self.points < 0:
             raise ValueError("trusted points must be nonnegative")
+        if type(self.prior_attempts) is not int or not 0 <= self.prior_attempts <= 1_000_000:
+            raise ValueError("trusted prior attempts are invalid")
         for name in ("category", "name", "challenge_type", "material_ref", "attempt_id"):
             _bounded_text(getattr(self, name), name)
         if self.instance_generation is not None:
@@ -240,12 +243,14 @@ def _initial_context(challenge: Mapping) -> AttemptContext:
 
 @contextmanager
 def trusted_attempt(
-    challenge: Mapping, *, deadline_monotonic: float | None = None
+    challenge: Mapping, *, deadline_monotonic: float | None = None,
+    prior_attempts: int = 0,
 ) -> Iterator[AttemptContext]:
     """Bind one context from trusted harness metadata and restore it afterward."""
     if _CURRENT.get() is not None:
         raise RuntimeError("nested trusted attempt context")
     context = _initial_context(challenge)
+    context = replace(context, prior_attempts=prior_attempts)
     if deadline_monotonic is not None:
         if (
             isinstance(deadline_monotonic, bool)

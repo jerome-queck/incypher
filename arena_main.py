@@ -606,7 +606,10 @@ def main():
         assert allocated_steps is not None
         shell = _StatefulShell(state, admission, os.getcwd())
         started = time.perf_counter()
-        with trusted_attempt(ch, deadline_monotonic=coordinator.deadline):
+        with trusted_attempt(
+            ch, deadline_monotonic=coordinator.deadline,
+            prior_attempts=state.challenge_attempts(cid),
+        ):
             solver_module.run_bash = shell
             try:
                 result = inherited_solve(client, ch, allocated_steps)

@@ -8,14 +8,16 @@ and unknown pricing; it never selects a different model.
 
 For the exact endpoint, `discover_provider(identity, fetch_json, cache=None)` calls the
 injected bounded fetcher once with the public models URL, a five-second timeout and a
-2 MiB response bound. It selects only the exact configured model ID. The result maps
+2 MiB response bound. It selects only the exact requested model ID. The result maps
 explicit supported optional parameters into `ProviderCapabilities` and parses bounded
 catalogue prompt/completion/request prices. Catalogue pricing provenance is explicit;
 it is not a provider charge or event budget meter.
 Only a bounded positive integer `top_provider.max_completion_tokens` from that exact
 entry, together with an advertised completion-limit parameter, authorizes extended
 completion capacity. Missing/malformed/opaque or compatible Day-2 metadata leaves
-the ceiling unknown. It never changes the selected model or inferred authority.
+the ceiling unknown. Discovery itself never changes the selected model or inferred
+authority. Brain's separate [image-owned route](model-gateway.md) may request
+discovery for a second exact model.
 The exact entry's bounded `canonical_slug` is retained as the only alternate observed
 identity accepted for that configured model; opaque providers require exact identity.
 
