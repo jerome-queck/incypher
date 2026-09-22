@@ -242,11 +242,25 @@ def normalize_response(
 
     usage = raw.get("usage")
     usage = usage if isinstance(usage, Mapping) else {}
-    measured = _money(usage.get("cost"))
+    router_cost = _money(usage.get("cost"))
+    if usage.get("is_byok") is True:
+        details = usage.get("cost_details")
+        upstream = (
+            _money(details.get("upstream_inference_cost"))
+            if isinstance(details, Mapping) else None
+        )
+        # OpenRouter reports zero charged cost for BYOK calls while the
+        # provider still bills upstream inference. Count both when present.
+        measured = (
+            _money(upstream + (router_cost or Decimal(0)))
+            if upstream is not None else None
+        )
+    else:
+        measured = router_cost
     estimate = _money(estimated_cost)
     if measured is not None:
         cost, provenance = measured, CostProvenance.MEASURED
-    elif estimate is not None:
+    elif estimate is not None and usage.get("is_byok") is not True:
         cost, provenance = estimate, CostProvenance.ESTIMATED
     else:
         cost, provenance = None, CostProvenance.UNKNOWN

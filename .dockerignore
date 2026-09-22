@@ -4,6 +4,7 @@
 !entrypoint.sh
 !validation_main.py
 !arena_main.py
+!requirements-tools.txt
 !agent_ext/
 !agent_ext/**
 agent_ext/**/__pycache__/

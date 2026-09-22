@@ -182,6 +182,27 @@ accepted xhigh/tool requests with exact Luna and Sol identities; this is
 compatibility, not solve quality. The earlier Rapido 15/15 run was Daybreak/Luna,
 not a fresh Sol 15/15 result. Keep push #28 running until a reviewed candidate
 image is ready; then account for current provider balance before replacement.
+PR #34 merged the Sol retry route at `e17d086`: 391 host tests passed
+(25 platform skips), 384 non-entrypoint restricted-container tests passed,
+and both exact pre-key-change images passed checker 6/0/2. The old OpenRouter
+key then returned 401 `API key expired` despite a prior USD13.16 remaining
+balance. The user's replacement key was valid at 08:36 with USD2.61 available;
+the rebuilt private Day-1 image `sha256:7daf7c6528876f70b75cb2b3df1452e1e11500e7c8f179f0491770ce4158c128`
+has a USD2.30 cap and passed checker 6/0/2. Its official push preflight
+passed, but upload failed on registry EOF. The public board still showed #28
+RUNNING at 11/15 around 08:32; no new image was registered. Retain this exact
+checked tag for retry when the registry responds. A separate small offline
+analysis-tools candidate now adds pydicom and bounded local-PCAP summaries;
+its Docker image/canaries are local only, not a live solve or release.
+The replacement key's content-free Sol/xhigh tool probe succeeded, but showed
+`is_byok=true`, `usage.cost=0` and upstream inference cost USD0.00054.
+OpenRouter reports this key's `include_byok_in_limit=false`: its USD2.61
+displayed limit does not cap upstream provider billing. A local correction
+counts upstream spend and reserves 3× catalogue cost, with absent upstream
+usage left unresolved. At about 08:48 the user replaced that key again: the
+current key reports a USD2.50 limit with `include_byok_in_limit=true`, so the
+BYOK spend is included in its key limit. The internal cap remains USD2.30.
+Do not push any prior Day-1 image; review and rebuild with the current key.
 
 ## Evidence and release identity
 
