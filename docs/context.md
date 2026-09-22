@@ -6,24 +6,15 @@ machine commands live in [setup.md](setup.md).
 
 ## Current release and next action
 
-Postmortem audit, 22 Sep (local, synthetic; release timeline below is historical):
-the checked #34 and #35 image files match this working tree on the audited
-runtime paths, except #34's earlier `runtime_state.py`. The clean Git baseline
-`933c1e8` and exact #35 image both reproduce command reread deduplication,
-pre-execution refusal deduplication, false progress from nonzero shell results,
-rejected benign findings, and an 85-call stop **when** cost and pricing are
-unavailable. The #35 image also kills a noisy computation at 12 KB. Cross-instance
-semantic finding transfer and private bounded output recall are present in #34/#35,
-so the postmortem's blanket loss-of-progress claim is only partly current.
-The generic `flag{...}` description conflicts with the official
-`INCYPHER{...}` format; a real mismatch is unproved. The inactive fixed-inspection
-snapshot test passed 12/12 in the #35 Linux image. These probes do not identify
-the cause of missed arena solves. Evidence seams: [shell wrapper](../arena_main.py),
-[state](../agent_ext/runtime_state.py), [shell](../agent_ext/managed_shell.py),
-[findings](../agent_ext/runtime_context.py), [budget](../agent_ext/model_gateway.py).
-**Next action:** if attribution is needed, obtain sanitized #34/#35 run outcomes,
-model-cost metadata and consistent ledger backups; no registry push follows from
-this audit.
+Post-competition update at 18:17 SGT: Git `main` now contains the scored-run
+solver source at `fefe49b`; CI passed. No new arena image was pushed. The public
+board ended at six solves, 750 VALID, 200 penalty and 550 NET; push #35 stopped
+when the competition closed. The [scoring handoff](scoring-postmortem-handoff-2026-09-22.md)
+separates the proven #32 large-file blocker and local runtime reproductions
+from unproven explanations for the other missed solves. **Next action:** obtain
+sanitized #34/#35 outcomes, logs and consistent budget/runtime ledger backups
+before attributing individual failures or changing release policy. The release
+timeline below is historical.
 
 At 22 Sep 15:57:05 SGT, user-authorized 500-point-priority push **#35**
 registered. The remote manifest matches the tested AMD64 digest
