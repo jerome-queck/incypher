@@ -438,6 +438,7 @@ class Brain:
         self._ledger = None
         self._opaque_reserve = None
         self._discovery = None
+        self._route_fallback = None
         self._tools = list(TOOLS)
         if getattr(run_bash, "supports_async", False) is True:
             self._tools.extend(ASYNC_TOOLS)
@@ -577,6 +578,10 @@ class Brain:
                 and is_exact_openrouter_chat(self._identity.endpoint)
             ):
                 hard_model = os.environ.get("LLM_HARD_MODEL", "openai/gpt-5.6-sol")
+                # Only this pair has an independently verified xhigh/tool
+                # request and an intended stronger-route policy.
+                if hard_model not in {"", "openai/gpt-5.6-sol"}:
+                    hard_model = ""
                 if hard_model and hard_model != self._identity.model:
                     hard_identity = ProviderIdentity(
                         self._identity.endpoint, self._identity.api_key, hard_model
@@ -599,18 +604,11 @@ class Brain:
                             hard_pace.posture != "ahead-of-target"
                             and snapshot.available >= hard_maximum
                         ):
+                            self._route_fallback = (self._identity, self._discovery)
                             self._identity = hard_identity
                             self._discovery = hard_discovery
         identity = self._identity
         assert self._discovery is not None
-        supported = set(self._discovery.capabilities.optional_parameters)
-        # Tool calling is part of the inherited compatible endpoint contract and
-        # was already required by the baseline Brain. Opaque providers get only
-        # these core fields plus the legacy completion limit, never reasoning/temperature.
-        supported.update({"tools", "tool_choice"})
-        if "max_tokens" not in supported and "max_completion_tokens" not in supported:
-            supported.add("max_tokens")
-        capabilities = ProviderCapabilities(frozenset(supported))
 
         if self._gateway is None:
 
@@ -642,8 +640,35 @@ class Brain:
             routing_enabled=os.environ.get("LLM_ROUTING_ENABLED") == "1",
         )
         reservation = ledger.reserve(call_id, maximum)
+        if (
+            not reservation.admitted
+            and self.model_calls == 1
+            and self._route_fallback is not None
+        ):
+            # A competing ledger writer may consume capacity after the earlier
+            # snapshot. Revert before any hard-model dispatch; later turns may
+            # not switch identities because that would mix conversation state.
+            self._identity, self._discovery = self._route_fallback
+            self._route_fallback = None
+            identity = self._identity
+            pace, estimated, maximum = _budget_request(
+                ledger.snapshot(), self._discovery, prompt_tokens, self._opaque_reserve
+            )
+            reasoning_effort = _effective_reasoning_effort(
+                identity, self._discovery, pace,
+                routing_enabled=os.environ.get("LLM_ROUTING_ENABLED") == "1",
+            )
+            reservation = ledger.reserve(call_id, maximum)
         if not reservation.admitted:
             raise GatewayError("model budget exhausted")
+        supported = set(self._discovery.capabilities.optional_parameters)
+        # Tool calling is part of the inherited compatible endpoint contract and
+        # was already required by the baseline Brain. Opaque providers get only
+        # these core fields plus the legacy completion limit, never reasoning/temperature.
+        supported.update({"tools", "tool_choice"})
+        if "max_tokens" not in supported and "max_completion_tokens" not in supported:
+            supported.add("max_tokens")
+        capabilities = ProviderCapabilities(frozenset(supported))
         response = self._gateway.complete(
             identity,
             bounded,

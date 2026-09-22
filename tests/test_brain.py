@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 import brain
 import agent_ext.runtime_context as runtime_context
 from agent_ext.provider_discovery import DiscoveryResult, ModelPricing
+from agent_ext.model_gateway import LedgerReservation
 from agent_ext.runtime_context import trusted_attempt
 from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
@@ -301,15 +302,17 @@ class BrainTests(unittest.TestCase):
 
         challenge = {"id": 7, "name": "Synthetic", "category": "crypto",
                      "type": "standard", "points": 200, "files": []}
-        for attempts, routing, hard_priced, hard_price, expected_model, expected_effort in (
-            (0, "1", True, "0.00001", "openai/gpt-5.6-luna", "xhigh"),
-            (2, "1", True, "0.00001", "openai/gpt-5.6-sol", "xhigh"),
-            (2, "1", False, "0.00001", "openai/gpt-5.6-luna", "xhigh"),
-            (2, "1", True, "0.01", "openai/gpt-5.6-luna", "xhigh"),
-            (2, "0", True, "0.00001", "openai/gpt-5.6-luna", "high"),
+        for attempts, routing, hard_priced, hard_price, denied, expected_model, expected_effort in (
+            (0, "1", True, "0.00001", False, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "1", True, "0.00001", False, "openai/gpt-5.6-sol", "xhigh"),
+            (2, "1", False, "0.00001", False, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "1", True, "0.01", False, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "1", True, "0.00001", True, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "0", True, "0.00001", False, "openai/gpt-5.6-luna", "high"),
         ):
             with self.subTest(attempts=attempts, routing=routing,
-                              hard_priced=hard_priced, hard_price=hard_price), tempfile.TemporaryDirectory() as directory:
+                              hard_priced=hard_priced, hard_price=hard_price,
+                              denied=denied), tempfile.TemporaryDirectory() as directory:
                 environment = {
                     "LLM_BASE_URL": "https://openrouter.ai/api/v1",
                     "LLM_MODEL": "openai/gpt-5.6-luna", "LLM_API_KEY": "synthetic",
@@ -322,9 +325,26 @@ class BrainTests(unittest.TestCase):
                 ), trusted_attempt(challenge, prior_attempts=attempts):
                     agent = brain.Brain(Mock(), Mock(), verbose=False)
                     agent.s = Session(hard_priced, hard_price)
+                    if denied:
+                        ledger = agent._ensure_ledger()
+                        reserve = ledger.reserve
+                        calls = []
+
+                        def competing_reserve(call_id, maximum):
+                            calls.append(maximum)
+                            if len(calls) == 1:
+                                return LedgerReservation(
+                                    call_id, maximum, False, False, "budget_exhausted"
+                                )
+                            return reserve(call_id, maximum)
+
+                        ledger.reserve = competing_reserve
                     agent._chat([{"role": "user", "content": "synthetic"}])
                     self.assertEqual(agent.s.posts[0]["model"], expected_model)
                     self.assertEqual(agent.s.posts[0]["reasoning"], {"effort": expected_effort})
+                    if denied:
+                        self.assertEqual(len(calls), 2)
+                        self.assertLess(calls[1], calls[0])
                     self.assertEqual(agent._ledger.snapshot().measured_cost,
                                      brain.Decimal("0.001"))
 

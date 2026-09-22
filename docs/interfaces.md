@@ -58,10 +58,9 @@ The normal loop has durable model-cost reservation/settlement and a separate bou
 runtime-state database for challenge outcomes, finite ranking backoff, scoped command
 fingerprints and typed safe findings. Accepted model turns and new tool observations
 checkpoint scheduler progress before final/crash classification. The trusted
-rank supplies completed prior-slice count to Brain. Only the
-image-owned exact OpenRouter/Luna policy may choose a separately discovered,
-priced Sol model at the start of a later slice; explicit organiser model settings
-are preserved and one slice never mixes model identities. Before callback dispatch,
+rank supplies completed prior-slice count to Brain for the
+[image-owned model route](model-gateway.md); explicit organiser model settings
+are preserved. Before callback dispatch,
 the active shell durably stores only a scope-keyed candidate identity, then commits a
 separate dispatch-possible marker. Uncertain effects block that exact material/instance
 scope until trusted catalogue reconciliation; attributable terminal outcomes remain as

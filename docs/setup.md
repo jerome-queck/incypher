@@ -24,6 +24,7 @@ values override the file. `doctor` reports presence only, not validity or secret
 | `MODEL_BUDGET_USD` | Durable run admission ceiling, USD 0.05–85; set from known remaining allowance |
 | `MODEL_CALL_RESERVE_USD` | Per-call reserve when pricing is opaque, USD 0.05–5 |
 | `MODEL_BUDGET_WINDOW_SECONDS` | Arena spend-pacing window; default 23,400 seconds (6.5 hours) |
+| `LLM_HARD_MODEL` | Image-owned hard route: exact Sol ID, or blank to disable; see [model policy](model-gateway.md) |
 
 The helper reads `.env` locally; Docker does not automatically read it. `practice`
 passes only allowlisted runtime names, including the budget controls above. A budget
@@ -31,13 +32,8 @@ ledger preserves calls and start time across restarts. A lower ceiling may be ap
 to an existing ledger, but raising it is rejected; use a fresh work directory for a
 separate newly budgeted run. The solver does not query provider balance automatically.
 Local `practice` forces fixed-high reasoning while retaining the configured `LLM_MODEL`.
-The image-owned Day-1 fallback and Day-2 image default may enable the exact
-OpenRouter Luna→Sol retry route; an explicit complete runtime model does not.
-The route requests `xhigh` only when exact discovery and a real request support
-it, and prices the selected model through the same durable ledger.
-`LLM_HARD_MODEL` may choose another exact catalogue-advertised tool model for
-that image-owned route; an empty value disables escalation. Keep its capability
-and cost test separate from the organiser's injected model settings.
+The image-owned [model route](model-gateway.md) uses the same ledger; an empty
+`LLM_HARD_MODEL` disables its Sol escalation.
 `build --phase day2` passes no model secret; its image default is
 used only when the organiser supplies endpoint/key without a model.
 Day-1 builds may include the bounded model-budget policy values above alongside the model

@@ -16,8 +16,8 @@ Only a bounded positive integer `top_provider.max_completion_tokens` from that e
 entry, together with an advertised completion-limit parameter, authorizes extended
 completion capacity. Missing/malformed/opaque or compatible Day-2 metadata leaves
 the ceiling unknown. Discovery itself never changes the selected model or inferred
-authority. Brain may separately discover exact Sol for the image-owned
-OpenRouter retry route; an unavailable or unpriced entry leaves Luna in place.
+authority. Brain's separate [image-owned route](model-gateway.md) may request
+discovery for a second exact model.
 The exact entry's bounded `canonical_slug` is retained as the only alternate observed
 identity accepted for that configured model; opaque providers require exact identity.
 

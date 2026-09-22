@@ -14,10 +14,18 @@ a provider declaring `reasoning_effort` receives the scalar form. An explicit
 organiser-injected runtime model is never routed. The Day-2 image-default
 discovery policy may resolve a different catalogue-advertised model before
 the first request; that resolved identity is then exact. The image-owned
-OpenRouter/Luna policy chooses Sol at a new slice after at least two trusted
+`xhigh` allowlist contains only Luna and Sol: exact real-key tool requests
+for each succeeded on 22 Sep. Catalogue metadata alone advertises the
+reasoning field, not permitted effort values; never infer `xhigh` for another
+model from that field. The image-owned
+OpenRouter/Luna policy chooses the exact `openai/gpt-5.6-sol` model at a new slice
+after at least two trusted
 unsolved slices only when Sol's exact catalogue entry supports tools and
 reasoning, has known pricing, is not ahead of the spend target and its
-conservative reservation fits. Otherwise Luna remains selected. Each slice
+conservative reservation fits. An empty `LLM_HARD_MODEL` disables Sol;
+any other value disables this route. If an interleaved ledger reservation
+denies the first Sol call, Brain tries Luna before dispatch. Otherwise Luna
+remains selected. Each slice
 uses one model for all turns. The gateway performs one finite-timeout transport call
 and never automatically retries a paid request.
 
