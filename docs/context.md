@@ -202,7 +202,23 @@ counts upstream spend and reserves 3× catalogue cost, with absent upstream
 usage left unresolved. At about 08:48 the user replaced that key again: the
 current key reports a USD2.50 limit with `include_byok_in_limit=true`, so the
 BYOK spend is included in its key limit. The internal cap remains USD2.30.
-Do not push any prior Day-1 image; review and rebuild with the current key.
+No prior Day-1 image was safe to publish with this key.
+PR #35 (`f2b6051`) merged the BYOK correction and two offline-analysis
+packages after independent reviews, CI, a 395-test host suite (27 expected
+skips), 388 restricted non-entrypoint tests, and a 6/0/2 clean-image checker.
+The exact private Day-1 image
+`sha256:701612f7cfded49db5993dfafdb92f8cfd359b770b9773cfa73f109db3e34de6`
+was built with the current key and USD2.30 cap, passed checker 6/0/2 and
+official push preflight, and was uploaded at 08:57:12 after the user switched
+this Mac to a hotspot. An independent remote manifest read matched that digest.
+[Status](https://hackathonlive.in-cypher.com/status) and
+[scores](https://hackathonlive.in-cypher.com/scores) registered push #29 as
+RUNNING at 11/15, 2,250 VALID, penalty 0. The public dashboard showed a
+Team 63 agent container restart at 09:00:07, consistent with pickup, but its
+image field is only the `latest` tag; it does not expose an active digest.
+No new solve is yet verified. Next: leave the new agent autonomous, watch the
+09:05+ scoring cycles and key usage, and investigate only a specific failure;
+do not conflate registration or synthetic tool canaries with live acceptance.
 
 ## Evidence and release identity
 
