@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -71,6 +72,44 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             "[shell status=ok exit=0 elapsed=0.001s truncated=false]\nfresh evidence"
         )
 
+    def test_all_solved_catalogue_waits_and_intakes_new_challenge(self):
+        challenges = [{
+            "id": 701, "name": "Already solved", "category": "misc",
+            "type": "standard", "value": 100, "files": [], "solved": True,
+        }]
+        attempted = []
+        sleeps = []
+
+        def solve_challenge(client, ch, max_steps):
+            attempted.append(ch["id"])
+            return {
+                "solved": False, "steps": 0, "model_calls": 0, "tool_calls": 0,
+                "error": "model budget exhausted",
+            }
+
+        official, solver = self._harness(
+            challenges, solve_challenge, "new_catalogue_solver"
+        )
+
+        def next_cycle(seconds):
+            sleeps.append(seconds)
+            challenges.append({
+                "id": 702, "name": "New at opening", "category": "crypto",
+                "type": "standard", "value": 200, "files": [], "solved": False,
+            })
+
+        with tempfile.TemporaryDirectory() as directory, (
+            patch.dict(sys.modules, {"main": official, "new_catalogue_solver": solver})
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+        }, clear=True), patch.object(
+            arena_main, "_CATALOGUE_REFRESH_SECONDS", 0.0
+        ), patch("arena_main.time.sleep", side_effect=next_cycle):
+            self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual(sleeps, [arena_main._PASS_RECOVERY_SECONDS])
+        self.assertEqual(attempted, [702])
+
     @staticmethod
     def _harness(challenges, solve_challenge, module_name):
         official = ModuleType("main")
@@ -123,9 +162,13 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         }
         prompts = []
         outputs = []
+        recovered = []
 
         def solve_challenge(client, ch, max_steps):
             prompts.append(solver.build_prompt(ch, material_directory, [], None))
+            if len(prompts) == 2:
+                handle = re.search(r"capture-[0-9a-f]{24}", prompts[-1]).group()
+                recovered.append(solver.run_bash.read_saved_output(handle))
             outputs.append(solver.run_bash("inspect material"))
             return {
                 "solved": False,
@@ -159,6 +202,8 @@ class CoordinatorRecoveryTests(unittest.TestCase):
         self.assertNotIn("Restart-safe prior evidence", prompts[0])
         self.assertIn("Restart-safe prior evidence", prompts[1])
         self.assertIn("bounded shell outcome: ok", prompts[1])
+        self.assertIn("Prior shell captures", prompts[1])
+        self.assertIn("fresh evidence", recovered[0])
         self.assertTrue(outputs[0].startswith("[shell status=ok"))
         self.assertEqual(
             outputs[1],
@@ -266,6 +311,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": state_path,
+                    "ONLY_IDS": "1,2",
                 }, clear=True),
                 patch("agent_ext.runtime_state.time.time", return_value=100.0),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
@@ -273,14 +319,14 @@ class CoordinatorRecoveryTests(unittest.TestCase):
             ):
                 self.assertEqual(arena_main.main(), 0)
                 self.assertEqual(events, [
-                    ("detail", 2), ("solve", 2),
                     ("detail", 1), ("solve", 1),
+                    ("detail", 2), ("solve", 2),
                 ])
                 self.assertEqual(returned[0]["error"], "RuntimeError: attempt crashed")
                 connection = sqlite3.connect(state_path)
                 try:
                     progress = connection.execute(
-                        "SELECT progress FROM challenge_state WHERE challenge_id = 2"
+                        "SELECT progress FROM challenge_state WHERE challenge_id = 1"
                     ).fetchone()[0]
                 finally:
                     connection.close()
@@ -477,6 +523,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 patch.dict(sys.modules, {"main": official, "multipass_solver": solver}),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "21",
                 }, clear=True),
                 patch("arena_main.time.sleep", side_effect=sleeps.append),
             ):
@@ -512,6 +559,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "22",
                 }, clear=True),
                 patch("arena_main.time.sleep"),
             ):
@@ -564,6 +612,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "23",
                 }, clear=True),
                 patch("arena_main.time.sleep", side_effect=sleeps.append),
             ):
@@ -612,6 +661,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 patch.dict(sys.modules, {"main": official, "model_budget_solver": solver}),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "31,32,33",
                 }, clear=True),
             ):
                 self.assertEqual(arena_main.main(), 0)
@@ -646,7 +696,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 patch.dict(sys.modules, {"main": official, "provider_stop_solver": solver}),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "41,42",
                 }, clear=True),
+                patch("arena_main.time.sleep"),
             ):
                 self.assertEqual(arena_main.main(), 0)
 
@@ -683,8 +735,10 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "43,44",
                 }, clear=True),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
+                patch("arena_main.time.sleep"),
             ):
                 self.assertEqual(arena_main.main(), 0)
 
@@ -723,6 +777,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 patch.dict(sys.modules, {"main": official, "crash_budget_solver": solver}),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "71",
                 }, clear=True),
                 patch("arena_main.time.sleep"),
             ):
@@ -761,7 +816,9 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "51,52",
                 }, clear=True),
+                patch("arena_main.time.sleep"),
             ):
                 self.assertEqual(arena_main.main(), 0)
 
@@ -895,6 +952,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                         "RUNTIME_STATE_PATH": os.path.join(
                             directory, "runtime.sqlite3"
                         ),
+                        "ONLY_IDS": "64",
                         **initial,
                     }
                     with (
@@ -1015,6 +1073,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 }),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "61",
                 }, clear=True),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
                 patch("arena_main.time.sleep"),
@@ -1072,6 +1131,7 @@ class CoordinatorRecoveryTests(unittest.TestCase):
                 patch.dict(sys.modules, {"main": official, "mixed_result_solver": solver}),
                 patch.dict(os.environ, {
                     "RUNTIME_STATE_PATH": os.path.join(directory, "runtime.sqlite3"),
+                    "ONLY_IDS": "71,72",
                 }, clear=True),
                 patch("arena_main.ManagedShell", _FakeManagedShell),
                 patch("arena_main.time.sleep"),

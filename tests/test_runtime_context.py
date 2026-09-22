@@ -69,15 +69,18 @@ class RuntimeContextTests(unittest.TestCase):
         self.assertNotIn("LEAK", prompt)
         self.assertNotIn("\n", prompt)
 
-    def test_oversized_material_is_rejected_not_prefix_hashed(self):
+    def test_oversized_material_remains_usable_without_reusing_prior_scope(self):
         with tempfile.TemporaryDirectory() as directory, patch(
             "agent_ext.runtime_context._MAX_HASH_BYTES", 4
         ):
             with open(os.path.join(directory, "a.bin"), "wb") as stream:
                 stream.write(b"abcde")
             with trusted_attempt(self.challenge):
-                with self.assertRaisesRegex(ValueError, "exceeds hash limit"):
-                    bind_prepared_material(self.challenge, directory, ["a.bin"], None)
+                first = bind_prepared_material(self.challenge, directory, ["a.bin"], None)
+            with trusted_attempt(self.challenge):
+                second = bind_prepared_material(self.challenge, directory, ["a.bin"], None)
+            self.assertEqual(first.file_count, 1)
+            self.assertNotEqual(first.material_ref, second.material_ref)
 
     def test_nested_or_malformed_context_is_rejected(self):
         with self.assertRaises(ValueError):

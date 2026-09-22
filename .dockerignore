@@ -7,5 +7,7 @@
 !requirements-tools.txt
 !agent_ext/
 !agent_ext/**
+!challenge_reference/
+!challenge_reference/**
 agent_ext/**/__pycache__/
 agent_ext/**/*.pyc

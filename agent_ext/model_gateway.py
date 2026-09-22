@@ -48,6 +48,14 @@ class GatewayTimeout(GatewayError):
     dispatch_unresolved = True
 
 
+class GatewayAvailabilityError(GatewayError):
+    """A sanitized, completed HTTP response says this model cannot serve the call.
+
+    This does not prove the provider did not charge for the attempted request.
+    Its ledger reservation must remain unresolved.
+    """
+
+
 class LedgerCapacityError(RuntimeError):
     pass
 
@@ -335,7 +343,7 @@ class ModelGateway:
             "Authorization": "Bearer " + identity.api_key,
             "Content-Type": "application/json",
         }
-        outcome: queue.Queue[tuple[bool, bytes | Mapping[str, Any] | None]] = queue.Queue(
+        outcome: queue.Queue[tuple[bool, bytes | Mapping[str, Any] | GatewayAvailabilityError | None]] = queue.Queue(
             maxsize=1
         )
 
@@ -344,6 +352,8 @@ class ModelGateway:
                 raw_result = self.transport(
                     identity.endpoint, headers, body, self.timeout_seconds
                 )
+            except GatewayAvailabilityError:
+                outcome.put((False, GatewayAvailabilityError("provider model unavailable")))
             except Exception:
                 # Provider exception bodies commonly contain request headers or remote
                 # payloads. Deliberately discard them before crossing the worker seam.
@@ -363,18 +373,25 @@ class ModelGateway:
             )
             self._active_dispatch = worker
             worker.start()
+        resolved = False
         try:
             succeeded, raw = outcome.get(timeout=self.timeout_seconds)
+            resolved = True
         except queue.Empty:
             # Python cannot safely cancel a blocked thread. Keep its identity attached
             # to this gateway so another dispatch cannot overlap while it remains live.
             raise GatewayTimeout("provider request timed out; dispatch is unresolved") from None
         finally:
-            if not worker.is_alive():
+            # queue.put is the worker's last action. Once its outcome was
+            # received, it has no remaining provider work, even if Python
+            # still reports the thread alive for one scheduling instant.
+            if resolved or not worker.is_alive():
                 with self._dispatch_lock:
                     if self._active_dispatch is worker:
                         self._active_dispatch = None
         if not succeeded:
+            if isinstance(raw, GatewayAvailabilityError):
+                raise raw
             raise GatewayError("provider request failed")
         if isinstance(raw, bytes):
             if len(raw) > _MAX_RESPONSE_BYTES:

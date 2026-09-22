@@ -76,9 +76,10 @@ Deadlines are cooperative around synchronous callbacks; a 30-second budget canno
 force-stop a 180-second HTTP request. Production hard limits need cancellable/bounded
 callbacks and a tested cleanup path. The active wrapper uses the exact guarded inherited
 main as its authorized selection seam. Each inherited pass admits one strictly bounded
-`MAX_STEPS` slice, defers every other unstarted challenge, then returns all still-unsolved
-work to the serial queue after a two-second cooldown. This gives each completed slice a
-fresh local ranking decision without overlapping dynamic lifecycles. The wrapper refreshes
+`MAX_STEPS` dynamic slice and, when eligible static work exists, one concurrent static
+slice on a separate client. It defers every other unstarted challenge, then reranks
+after a two-second cooldown. The inherited main still receives both results and is the
+sole results writer; the worker never owns a dynamic instance. The wrapper refreshes
 the inherited trusted catalogue at most every five minutes; intervening passes rerank a
 defensive cached copy, and accepted solves update only that cache until the next refresh.
 Temporary catalogue read failures retain the prior trusted snapshot for one full cadence;
@@ -100,11 +101,28 @@ targets. There is no separate cumulative
 slice or call-count cutoff: durable model-dollar admission and a 24-hour process safety
 bound govern the run. The separate 6.5-hour pacing window is a soft spend target toward
 the competition horizon, not the process lifetime or dollar ceiling. A normal empty
-catalogue/queue polls again after 30 seconds; an explicit selector exits when empty. Hard
+or all-solved catalogue/queue polls again after 30 seconds and refreshes the trusted
+catalogue at most every five minutes, so newly opened challenges become eligible
+without a push. An explicit selector exits when empty or solved. Hard
 model-dollar exhaustion, an inherited nonzero return, the process deadline, or an unresolved
 gateway transport worker is terminal. Other provider, submission, crash and malformed-response
 outcomes affect durable ranking without killing the outer queue. The inherited main remains
 the sole lifecycle, submission and results owner.
+
+The active scored queue selects unsolved 500-point challenges with locally
+corroborated exploit paths first, across both kinds. Within the remaining
+tiers it selects due proven static revisit, fresh proven static, due proven
+dynamic revisit, fresh proven dynamic, unknown fresh static, unknown fresh
+dynamic, then ordinary retries. Higher trusted point values lead within each
+tier. One failed proven method gets an early full-budget revisit after three
+other completed challenges; a second miss removes this priority. This avoids
+burying a locally verified exploit behind the whole catalogue while still giving
+fresh challenges a first attempt. First looks have 12 model turns (16 with local proof);
+revisits retain the packaged 24-turn cap. Explicit selectors keep their configured
+cap. Solved state and eligibility/backoff still gate dispatch. A static worker
+may overlap one live dynamic instance; no second dynamic worker is admitted.
+After the selected slice, deferred and solved challenges use already-read trusted
+catalogue metadata, avoiding full-detail requests for work not dispatched.
 
 ## Verification and integration gate
 

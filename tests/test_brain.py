@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 import brain
 import agent_ext.runtime_context as runtime_context
 from agent_ext.provider_discovery import DiscoveryResult, ModelPricing
-from agent_ext.model_gateway import LedgerReservation
+from agent_ext.model_gateway import CostProvenance, LedgerReservation, UsageMetadata
 from agent_ext.runtime_context import trusted_attempt
 from agent_ext.runtime_context import Finding, FindingDisposition, FindingKind
 
@@ -302,21 +302,27 @@ class BrainTests(unittest.TestCase):
 
         challenge = {"id": 7, "name": "Synthetic", "category": "crypto",
                      "type": "standard", "points": 200, "files": []}
-        for attempts, routing, hard_priced, hard_price, denied, expected_model, expected_effort in (
-            (0, "1", True, "0.00001", False, "openai/gpt-5.6-luna", "xhigh"),
-            (2, "1", True, "0.00001", False, "openai/gpt-5.6-sol", "xhigh"),
-            (2, "1", False, "0.00001", False, "openai/gpt-5.6-luna", "xhigh"),
-            (2, "1", True, "0.01", False, "openai/gpt-5.6-luna", "xhigh"),
-            (2, "1", True, "0.00001", True, "openai/gpt-5.6-luna", "xhigh"),
-            (2, "0", True, "0.00001", False, "openai/gpt-5.6-luna", "high"),
+        for attempts, routing, sol_first, hard_priced, hard_price, denied, ahead, expected_model, expected_effort in (
+            (0, "1", False, True, "0.00001", False, False, "openai/gpt-5.6-luna", "xhigh"),
+            (0, "1", True, True, "0.00001", False, False, "openai/gpt-5.6-sol", "xhigh"),
+            (0, "1", True, True, "0.00001", False, True, "openai/gpt-5.6-sol", "xhigh"),
+            (0, "1", True, False, "0.00001", False, False, "openai/gpt-5.6-luna", "xhigh"),
+            (1, "1", False, True, "0.00001", False, False, "openai/gpt-5.6-sol", "xhigh"),
+            (1, "1", False, False, "0.00001", False, False, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "1", False, True, "0.00001", False, False, "openai/gpt-5.6-sol", "xhigh"),
+            (2, "1", False, False, "0.00001", False, False, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "1", False, True, "0.01", False, False, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "1", False, True, "0.00001", True, False, "openai/gpt-5.6-luna", "xhigh"),
+            (2, "0", True, True, "0.00001", False, False, "openai/gpt-5.6-luna", "high"),
         ):
             with self.subTest(attempts=attempts, routing=routing,
-                              hard_priced=hard_priced, hard_price=hard_price,
-                              denied=denied), tempfile.TemporaryDirectory() as directory:
+                              sol_first=sol_first, hard_priced=hard_priced, hard_price=hard_price,
+                              denied=denied, ahead=ahead), tempfile.TemporaryDirectory() as directory:
                 environment = {
                     "LLM_BASE_URL": "https://openrouter.ai/api/v1",
                     "LLM_MODEL": "openai/gpt-5.6-luna", "LLM_API_KEY": "synthetic",
                     "LLM_ROUTING_ENABLED": routing,
+                    "LLM_SOL_FIRST": "1" if sol_first else "0",
                     "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
                     "MODEL_BUDGET_USD": "2", "MODEL_SPEND_PACING": "adaptive",
                 }
@@ -325,6 +331,17 @@ class BrainTests(unittest.TestCase):
                 ), trusted_attempt(challenge, prior_attempts=attempts):
                     agent = brain.Brain(Mock(), Mock(), verbose=False)
                     agent.s = Session(hard_priced, hard_price)
+                    if ahead:
+                        ledger = agent._ensure_ledger()
+                        ledger.reserve("prior", brain.Decimal("0.5"))
+                        ledger.settle("prior", UsageMetadata(
+                            0, 0, 0, brain.Decimal("0.5"), CostProvenance.MEASURED
+                        ))
+                        with sqlite3.connect(environment["MODEL_BUDGET_PATH"]) as connection:
+                            connection.execute(
+                                "UPDATE model_budget_meta SET value = ? WHERE key = 'started_at'",
+                                (str(time.time() - 3600),),
+                            )
                     if denied:
                         ledger = agent._ensure_ledger()
                         reserve = ledger.reserve
@@ -346,7 +363,205 @@ class BrainTests(unittest.TestCase):
                         self.assertEqual(len(calls), 2)
                         self.assertLess(calls[1], calls[0])
                     self.assertEqual(agent._ledger.snapshot().measured_cost,
-                                     brain.Decimal("0.001"))
+                                     brain.Decimal("0.501" if ahead else "0.001"))
+
+    def test_image_owned_first_turn_availability_failover_is_priced_and_bounded(self):
+        class Response:
+            def __init__(self, payload, status=200):
+                self.content = json.dumps(payload).encode()
+                self.headers = {"Content-Length": str(len(self.content))}
+                self.status_code = status
+
+            def raise_for_status(self):
+                if self.status_code != 200:
+                    raise brain.requests.HTTPError("secret provider error body")
+
+            def iter_content(self, chunk_size):
+                yield self.content
+
+            def close(self):
+                return None
+
+        class Session:
+            def __init__(self, status=503, fallback_priced=True, fail_on=1,
+                         tool_reply=False):
+                self.posts = []
+                self.status = status
+                self.fallback_priced = fallback_priced
+                self.fail_on = fail_on
+                self.tool_reply = tool_reply
+
+            def get(self, url, timeout, stream, headers=None):
+                entries = []
+                for model, price in (
+                    ("openai/gpt-5.6-luna", "0.000001"),
+                    ("openai/gpt-5.6-sol", "0.000010"),
+                    ("google/gemini-3.1-pro-preview-customtools", "0.000012"),
+                ):
+                    entry = {
+                        "id": model,
+                        "supported_parameters": [
+                            "reasoning", "tools", "tool_choice", "max_tokens",
+                        ],
+                        "top_provider": {"max_completion_tokens": 65536},
+                    }
+                    if model != "google/gemini-3.1-pro-preview-customtools" or self.fallback_priced:
+                        entry["pricing"] = {
+                            "prompt": "0.000002", "completion": price,
+                        }
+                    entries.append(entry)
+                return Response({"data": entries})
+
+            def post(self, endpoint, headers, data, timeout, stream):
+                request = json.loads(data)
+                self.posts.append(request)
+                if len(self.posts) == self.fail_on and self.status == "refusal":
+                    return Response({
+                        "model": request["model"],
+                        "choices": [{"message": {
+                            "role": "assistant", "content": "",
+                            "refusal": "synthetic refusal",
+                        }}],
+                        "usage": {"cost": "0.001"},
+                    })
+                if len(self.posts) == self.fail_on:
+                    return Response({"error": "secret provider error body"}, self.status)
+                if self.tool_reply:
+                    return Response({
+                        "model": request["model"],
+                        "choices": [{"message": {
+                            "role": "assistant", "content": "",
+                            "tool_calls": [{
+                                "id": "tool-1", "type": "function",
+                                "function": {"name": "run_bash", "arguments":
+                                             json.dumps({"command": "inspect"})},
+                            }],
+                        }}],
+                        "usage": {"cost": "0.001"},
+                    })
+                return Response({
+                    "model": request["model"],
+                    "choices": [{"message": {"role": "assistant", "content": "done"}}],
+                    "usage": {"cost": "0.001"},
+                })
+
+        challenge = {"id": 7, "name": "Synthetic", "category": "crypto",
+                     "type": "standard", "points": 200, "files": []}
+        for status, priced, max_steps, expect_fallback in (
+            (404, True, 4, True),
+            (429, True, 4, True),
+            (503, True, 4, True),
+            (500, True, 4, False),
+            (403, True, 4, False),
+            (503, False, 4, False),
+            (503, True, 1, False),
+            (503, True, 2, False),
+        ):
+            with self.subTest(status=status, priced=priced, max_steps=max_steps), \
+                    tempfile.TemporaryDirectory() as directory:
+                environment = {
+                    "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+                    "LLM_MODEL": "openai/gpt-5.6-luna", "LLM_API_KEY": "synthetic",
+                    "LLM_MODEL_AUTO_DISCOVER": "1", "LLM_ROUTING_ENABLED": "1",
+                    "LLM_SOL_FIRST": "1", "MODEL_BUDGET_USD": "2",
+                    "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+                }
+                with patch.dict(os.environ, environment, clear=True), patch.object(
+                    brain, "_DISCOVERY_CACHE", brain.DiscoveryCache()
+                ), trusted_attempt(challenge):
+                    agent = brain.Brain(Mock(), Mock(), max_steps=max_steps, verbose=False)
+                    agent.s = Session(status, priced)
+                    if expect_fallback:
+                        message = agent._chat([{"role": "user", "content": "synthetic"}])
+                        self.assertEqual(message["content"], "done")
+                        self.assertEqual(agent.model_calls, 2)
+                        self.assertEqual(agent.s.posts[1]["model"],
+                                         "google/gemini-3.1-pro-preview-customtools")
+                        self.assertEqual(agent._identity.model,
+                                         "google/gemini-3.1-pro-preview-customtools")
+                        self.assertEqual(agent._ledger.snapshot().measured_cost,
+                                         brain.Decimal("0.001"))
+                    else:
+                        with self.assertRaises(brain.GatewayError):
+                            agent._chat([{"role": "user", "content": "synthetic"}])
+                        self.assertEqual(agent.model_calls, 1)
+                    self.assertEqual(len(agent.s.posts), 2 if expect_fallback else 1)
+                    self.assertEqual(agent.s.posts[0]["model"], "openai/gpt-5.6-sol")
+                    self.assertGreater(agent._ledger.snapshot().unresolved_cost, 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+                "LLM_MODEL": "openai/gpt-5.6-luna", "LLM_API_KEY": "synthetic",
+                "LLM_MODEL_AUTO_DISCOVER": "1", "LLM_ROUTING_ENABLED": "1",
+                "LLM_SOL_FIRST": "1", "MODEL_BUDGET_USD": "2",
+                "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                brain, "_DISCOVERY_CACHE", brain.DiscoveryCache()
+            ), trusted_attempt(challenge):
+                agent = brain.Brain(Mock(), Mock(), max_steps=4, verbose=False)
+                agent.s = Session(503, fail_on=2)
+                agent._chat([{"role": "user", "content": "first turn"}])
+                with self.assertRaises(brain.GatewayAvailabilityError):
+                    agent._chat([{"role": "user", "content": "later turn"}])
+                self.assertEqual(len(agent.s.posts), 2)
+                self.assertEqual(agent._identity.model, "openai/gpt-5.6-sol")
+
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+                "LLM_MODEL": "openai/gpt-5.6-sol", "LLM_API_KEY": "synthetic",
+                "MODEL_BUDGET_USD": "2",
+                "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                brain, "_DISCOVERY_CACHE", brain.DiscoveryCache()
+            ), trusted_attempt(challenge):
+                agent = brain.Brain(Mock(), Mock(), max_steps=4, verbose=False)
+                agent.s = Session(503)
+                with self.assertRaises(brain.GatewayAvailabilityError):
+                    agent._chat([{"role": "user", "content": "explicit model"}])
+                self.assertEqual(len(agent.s.posts), 1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+                "LLM_MODEL": "openai/gpt-5.6-luna", "LLM_API_KEY": "synthetic",
+                "LLM_MODEL_AUTO_DISCOVER": "1", "LLM_ROUTING_ENABLED": "1",
+                "LLM_SOL_FIRST": "1", "MODEL_BUDGET_USD": "2",
+                "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                brain, "_DISCOVERY_CACHE", brain.DiscoveryCache()
+            ), trusted_attempt(challenge):
+                agent = brain.Brain(FindingShell(), Mock(), max_steps=3, verbose=False)
+                agent.s = Session(503, tool_reply=True)
+                result = agent.solve("synthetic")
+                self.assertEqual(result["model_calls"], 3)
+                self.assertEqual(len(agent.s.posts), 3)
+                final_request = agent.s.posts[2]
+                self.assertIn("model turn 3/3", final_request["messages"][-1]["content"])
+                self.assertIn("Final model turn", final_request["messages"][-1]["content"])
+                self.assertEqual({tool["function"]["name"] for tool in final_request["tools"]},
+                                 {"submit_flag", "checkpoint_finding"})
+
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+                "LLM_MODEL": "openai/gpt-5.6-luna", "LLM_API_KEY": "synthetic",
+                "LLM_MODEL_AUTO_DISCOVER": "1", "LLM_ROUTING_ENABLED": "1",
+                "LLM_SOL_FIRST": "1", "MODEL_BUDGET_USD": "2",
+                "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                brain, "_DISCOVERY_CACHE", brain.DiscoveryCache()
+            ), trusted_attempt(challenge):
+                agent = brain.Brain(Mock(), Mock(), max_steps=4, verbose=False)
+                agent.s = Session("refusal")
+                self.assertEqual(agent._chat([{"role": "user", "content": "synthetic"}])
+                                 ["refusal"], "synthetic refusal")
+                self.assertEqual(len(agent.s.posts), 1)
 
     def test_verified_behind_pace_request_uses_extended_completion_cap(self):
         class Response:
@@ -778,6 +993,37 @@ class BrainTests(unittest.TestCase):
             "Finding saved for this exact scope.",
             [message.get("content") for message in agent.requests[1]],
         )
+
+    def test_saved_output_tool_returns_prior_capture_without_rerunning(self):
+        class SavedShell:
+            def __init__(self):
+                self.handles = []
+
+            def __call__(self, command):
+                raise AssertionError("saved output must not dispatch a command")
+
+            def read_saved_output(self, handle):
+                self.handles.append(handle)
+                return "[shell status=ok]\nprevious exact observation"
+
+        shell = SavedShell()
+        handle = "capture-" + "a" * 24
+        replies = [
+            {"content": "", "tool_calls": [{"id": "saved", "function": {
+                "name": "read_saved_output", "arguments": json.dumps({"handle": handle}),
+            }}]},
+            {"content": "done"},
+        ]
+        agent = CapturingBrain(replies, run_bash=shell, submit_flag=Mock(), verbose=False)
+        result = agent.solve("synthetic")
+        self.assertFalse(result["solved"])
+        self.assertEqual(result["tool_calls"], 1)
+        self.assertEqual(shell.handles, [handle])
+        self.assertIn("read_saved_output", {
+            tool["function"]["name"] for tool in agent._tools
+        })
+        self.assertTrue(any("previous exact observation" in str(message.get("content"))
+                            for message in agent.requests[1]))
 
     def test_final_turn_reserves_semantic_checkpoint_after_shell_evidence(self):
         class BudgetAwareBrain(brain.Brain):
@@ -1371,6 +1617,18 @@ class BrainTests(unittest.TestCase):
                 self.assertEqual(agent.solve("sample")["error"], "malformed model message")
                 command.assert_not_called()
                 submit.assert_not_called()
+
+    def test_structured_model_refusal_is_classified_without_text_leak(self):
+        command, submit = Mock(), Mock()
+        result = ScriptedBrain(
+            [{"role": "assistant", "content": None,
+              "refusal": "Synthetic refusal with INCYPHER{do-not-copy}"}],
+            run_bash=command, submit_flag=submit, verbose=False,
+        ).solve("sample")
+        self.assertEqual(result["error"], "model refusal")
+        self.assertNotIn("do-not-copy", str(result))
+        command.assert_not_called()
+        submit.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -3,7 +3,16 @@ import sys
 import time
 import unittest
 
-from agent_ext.managed_shell import ManagedShell
+from agent_ext.managed_shell import ManagedShell, _heavy
+
+
+class HeavyToolClassificationTests(unittest.TestCase):
+    def test_general_offline_analysis_gets_heavy_allowance(self):
+        for command in ("tesseract input.png stdout", "pdftotext input.pdf -",
+                        "pdftoppm input.pdf /tmp/page", "pdfimages input.pdf /tmp/image",
+                        "7z l input.7z", "python3 -c 'import z3'"):
+            with self.subTest(command=command):
+                self.assertTrue(_heavy(command))
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "Linux confinement required")

@@ -18,7 +18,10 @@ from .resources import Admission, AdmissionError, Capacity, Cost
 
 _OUTPUT_BYTES = 12_000
 _MAX_HANDLES = 2
-_HEAVY_MARKERS = ("gdb", "binwalk", "nmap", "objdump", "radare", "python", "find ")
+_HEAVY_MARKERS = (
+    "gdb", "binwalk", "nmap", "objdump", "radare", "python", "find ",
+    "tesseract", "pdftotext", "pdftoppm", "pdfimages", "7z ",
+)
 RESOURCE_STATUSES = frozenset({
     "output_limit", "cost_exceeds_capacity", "queue_timeout", "queue_full",
     "confinement_unavailable", "execution_error", "cleanup_failed",

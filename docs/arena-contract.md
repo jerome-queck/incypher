@@ -13,6 +13,12 @@ results. It contains no credentials, flags, or raw run output.
 - Reviewed repository baseline: `7fb4159857f1de56e79b4462ef05ea83b47eda1a`.
 - Organiser base: `registry.in-cypher.com:5001/base/agent-base:latest` at
   `sha256:d3c707c6187f49a8b5f0ba617b9590cce72a18676d93343a93098726c7723224`.
+- Fresh 22 Sep 09:30 remote base digest:
+  `sha256:081f5477e3b222185a7265beacb9a90505b589a389adaa3352cf7afb4709531e`.
+  It was pulled independently. `main.py`, `solver.py` and `ctfd.py` have the same
+  SHA-256 file hashes as the earlier derived image; the bundled contract changed
+  only its Day-2 model-config paragraph, now explicitly saying organisers inject
+  endpoint/key but **not** `LLM_MODEL`. This does not identify the running image.
 - First submitted derived image: `sha256:aa19961428f1cf24a654ddb5ec89fab924c1bcbe77f7978654c31a42cb5ddbca`.
 - Arena-validated one-challenge release:
   `sha256:5083e3f7563ca307ffbaa072f643343ed706968dd54a683c315e4db4366c70fe`.

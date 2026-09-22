@@ -16,6 +16,7 @@ import re
 import sqlite3
 import threading
 import time
+from bisect import bisect_right
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from .runtime_context import (
     FindingDisposition,
     FindingKind,
 )
+from .challenge_methods import has_local_proof
 
 
 MAX_PROJECTION_RECORDS = 16
@@ -39,6 +41,7 @@ _MAX_CHALLENGES = 4096
 _MAX_SUBMISSION_INTENTS = 4096
 _CROWD_SOLVE_COUNT_CAP = 5
 _CROWD_RETRY_CREDIT_CAP = 2
+_PROVEN_RETRY_GAP = 3
 _SUBMISSION_RECONCILE_SECONDS = 300.0
 _HASH_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _SECRET_PATTERNS = (
@@ -503,10 +506,21 @@ class RuntimeState:
         except sqlite3.Error as exc:
             raise RuntimeStateError("runtime state read failed") from exc
 
+        valid_rows = {
+            brief.scope.key: row
+            for brief in briefs
+            if (row := rows.get(brief.scope.key)) is not None
+            and self._valid_state_row(row, brief.scope)
+        }
+        completed_times = sorted(
+            float(row["last_attempt_at"])
+            for row in valid_rows.values()
+            if row["attempts"] > 0
+        )
         ranked: list[tuple[tuple[object, ...], RankedChallenge]] = []
         for brief in briefs:
-            row = rows.get(brief.scope.key)
-            if row is None or not self._valid_state_row(row, brief.scope):
+            row = valid_rows.get(brief.scope.key)
+            if row is None:
                 attempts = progress = 0
                 backoff_until = last_attempt = 0.0
                 locally_solved = False
@@ -519,16 +533,49 @@ class RuntimeState:
             eligible = backoff_until <= instant
             remaining = max(0.0, backoff_until - instant)
             item = RankedChallenge(brief, eligible, attempts, progress, remaining)
+            # Proven 500-point methods lead both kinds; remaining tiers retain
+            # static/dynamic fairness, with larger values first. A method with one
+            # unsuccessful slice gets one early full-budget revisit after
+            # three other distinct briefs complete, not after all fresh
+            # work. A second miss removes this promotion.
+            proof = has_local_proof(brief.challenge_id)
+            proven_retry_due = (
+                proof and attempts == 1 and row is not None
+                and row["last_outcome"] == AttemptOutcome.UNSOLVED.value
+                and len(completed_times) - bisect_right(completed_times, last_attempt)
+                >= _PROVEN_RETRY_GAP
+            )
+            high_value_proof = (
+                proof and brief.points >= 500
+                and (attempts == 0 or proven_retry_due)
+            )
+            if proven_retry_due and brief.kind is ChallengeKind.STATIC:
+                lane = 0
+            elif attempts == 0 and proof and brief.kind is ChallengeKind.STATIC:
+                lane = 1
+            elif proven_retry_due and brief.kind is ChallengeKind.DYNAMIC:
+                lane = 2
+            elif attempts == 0 and proof and brief.kind is ChallengeKind.DYNAMIC:
+                lane = 3
+            elif attempts == 0 and brief.kind is ChallengeKind.STATIC:
+                lane = 4
+            elif attempts == 0 and brief.kind is ChallengeKind.DYNAMIC:
+                lane = 5
+            else:
+                lane = 6
             # Saved only for the deterministic sort below.
             item_key = (
                 solved,
                 not eligible,
+                0 if high_value_proof else 1,
+                lane,
+                0 if proof and attempts == 1 else 1,
                 max(0, attempts - min(brief.crowd_solves, _CROWD_RETRY_CREDIT_CAP)),
                 -min(brief.crowd_solves, _CROWD_SOLVE_COUNT_CAP),
                 attempts,
                 -progress,
-                brief.points,
-                brief.kind is ChallengeKind.DYNAMIC,
+                -brief.points,
+                brief.kind is ChallengeKind.STATIC,
                 last_attempt,
                 brief.challenge_id,
             )
@@ -1225,6 +1272,53 @@ class RuntimeState:
         """Integration alias accepting either Scope or trusted AttemptContext."""
         scope = context if isinstance(context, Scope) else scope_from_context(context)
         return self.project(scope)
+
+    def project_invariant_findings(self, context: Scope | object) -> Projection:
+        """Only validated semantic findings from prior generations of this material."""
+        scope = context if isinstance(context, Scope) else scope_from_context(context)
+        if scope.kind is not ChallengeKind.DYNAMIC:
+            return Projection("", 0)
+        redactions = () if isinstance(context, Scope) else _field(context, "redaction_values", ())
+        if not isinstance(redactions, (tuple, list)):
+            return Projection("", 0)
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """SELECT * FROM observations WHERE challenge_id = ?
+                       AND material_hash = ? AND challenge_kind = 'dynamic'
+                       AND instance_hash != ? AND observation_kind = 'finding'
+                       ORDER BY created_at DESC, id DESC LIMIT ?""",
+                    (scope.challenge_id, scope.material_hash, scope.instance_hash,
+                     MAX_SCOPE_OBSERVATIONS),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise RuntimeStateError("invariant memory read failed") from exc
+        lines: list[str] = []
+        size = 0
+        for row in rows:
+            if len(lines) >= MAX_PROJECTION_RECORDS:
+                break
+            try:
+                previous = Scope(
+                    row["challenge_id"], row["material_hash"],
+                    ChallengeKind.DYNAMIC, row["instance_hash"],
+                )
+                if not self._valid_observation(row, previous):
+                    continue
+                finding = Finding(FindingKind(row["finding_kind"]), row["summary"])
+                if finding.contains_redaction_value(redactions):
+                    continue
+            except (ValueError, KeyError, TypeError):
+                continue
+            record = json.dumps({"finding_kind": finding.kind.value,
+                                 "summary": finding.summary},
+                                ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            length = len(record.encode("utf-8")) + (1 if lines else 0)
+            if size + length > MAX_PROJECTION_BYTES:
+                continue
+            lines.append(record)
+            size += length
+        return Projection("\n".join(lines), len(lines))
 
     def checkpoint(self) -> None:
         """Request a bounded WAL checkpoint; readers remain safe during writes."""

@@ -65,9 +65,10 @@ python scripts/arena.py push --phase day2 --image incypher-agent:day2
 ```
 
 Follow the full [release gates](docs/setup.md#day-2-release) first. A registry push is
-the submission; a Git push/PR/merge is not. Day-2 re-uploads cost points.
+the submission; a Git push/PR/merge is not. Later Day-2 re-uploads cost points.
 Watch [status](https://hackathonlive.in-cypher.com/status) and
-[scores](https://hackathonlive.in-cypher.com/scores).
+[scores](https://hackathonlive.in-cypher.com/scores). The live guide currently
+allows three free scored-day re-uploads before 100-point charges.
 
 ## What runs
 

@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from types import ModuleType
 from types import SimpleNamespace
@@ -165,6 +166,232 @@ class ArenaSelectionTests(unittest.TestCase):
         coordinator.begin_pass()
         self.assertEqual(coordinator.admit(4), (4, None))
 
+    def test_static_worker_overlaps_dynamic_and_results_return_through_main(self):
+        challenges = [
+            {"id": 10, "name": "static", "category": "misc", "type": "standard",
+             "points": 100, "solved": False, "files": []},
+            {"id": 20, "name": "dynamic", "category": "web", "type": "dynamic_iac",
+             "points": 100, "solved": False, "files": []},
+        ]
+        official = ModuleType("main")
+        solver = ModuleType("parallel_solver")
+        solver.build_prompt = lambda ch, cdir, filenames, conn: ch["name"]
+        solver.run_bash = lambda cmd: "unused"
+        dynamic_started = threading.Event()
+        static_started = threading.Event()
+        solve_clients = {}
+        inherited_results = []
+
+        def solve_challenge(client, ch, max_steps):
+            solve_clients[ch["id"]] = id(client)
+            if ch["type"] == "dynamic_iac":
+                dynamic_started.set()
+                self.assertTrue(static_started.wait(2))
+            else:
+                static_started.set()
+                self.assertTrue(dynamic_started.wait(2))
+            return {
+                "id": ch["id"], "name": ch["name"], "category": ch["category"],
+                "type": ch["type"], "had_files": False,
+                "had_instance": ch["type"] == "dynamic_iac", "seconds": 0.0,
+                "solved": True, "steps": 1, "model_calls": 1, "tool_calls": 0,
+            }
+
+        solve_challenge.__module__ = "parallel_solver"
+        official.solve_challenge = solve_challenge
+        official.is_practice = lambda ch: False
+
+        class Client:
+            def __init__(self, base, token):
+                self.base, self.token = base, token
+
+            def list_challenges(self):
+                return [dict(item) for item in challenges]
+
+            def challenge(self, cid):
+                return dict(next(item for item in challenges if item["id"] == cid))
+
+        official.CTFdClient = Client
+
+        def inherited_main():
+            client = official.CTFdClient("base", "token")
+            targets = client.list_challenges()
+            targets.sort(key=lambda item: item["id"])
+            for brief in targets:
+                inherited_results.append(official.solve_challenge(
+                    client, client.challenge(brief["id"]), 4
+                ))
+            return 0
+
+        official.main = inherited_main
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {"main": official, "parallel_solver": solver}
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True), patch.object(
+            arena_main._OuterCoordinator, "should_continue", return_value=False
+        ):
+            self.assertEqual(arena_main.main(), 0)
+
+        self.assertTrue(dynamic_started.is_set())
+        self.assertTrue(static_started.is_set())
+        self.assertEqual([result["id"] for result in inherited_results], [20, 10])
+        self.assertNotEqual(solve_clients[10], solve_clients[20])
+
+    def test_parallel_lane_skips_ineligible_work_and_treats_services_as_dynamic(self):
+        lane = arena_main._ParallelStaticLane(enabled=True)
+        lane.set_eligibility(lambda challenge_id: challenge_id != 20)
+        ordered = [
+            {"id": 10, "type": "standard", "solved": False},
+            {"id": 20, "type": "container", "solved": False},
+            {"id": 30, "type": "service", "solved": False},
+        ]
+        try:
+            prepared = lane.prepare(ordered)
+            self.assertEqual([brief["id"] for brief in prepared], [30, 10, 20])
+            self.assertTrue(lane.selected_dynamic(30))
+            self.assertTrue(lane.selected_static(10))
+            self.assertFalse(lane.selected_static(20))
+        finally:
+            lane.close()
+
+    def test_shell_proxy_keeps_each_parallel_attempt_on_its_own_target(self):
+        local = threading.local()
+        proxy = arena_main._ThreadLocalShellProxy(local)
+        barrier = threading.Barrier(2)
+        observed = []
+        lock = threading.Lock()
+
+        class Target:
+            def __init__(self, label):
+                self.label = label
+
+            def __call__(self, command):
+                return f"{self.label}:{command}"
+
+        def invoke(label):
+            local.shell = Target(label)
+            barrier.wait()
+            value = proxy("inspect")
+            with lock:
+                observed.append(value)
+            del local.shell
+
+        workers = [threading.Thread(target=invoke, args=(label,)) for label in ("a", "b")]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(2)
+            self.assertFalse(worker.is_alive())
+        self.assertEqual(sorted(observed), ["a:inspect", "b:inspect"])
+        for name in (
+            "start", "poll", "cancel", "read_saved_output", "record_model_progress",
+            "checkpoint_finding", "reserve_submission", "submission_reconciled",
+            "mark_submission_dispatch_possible", "reconcile_submission",
+        ):
+            self.assertTrue(callable(getattr(type(proxy), name, None)))
+
+    def test_parallel_worker_detail_failure_returns_sanitized_unsolved_result(self):
+        challenges = [
+            {"id": 10, "name": "static", "category": "misc", "type": "standard",
+             "points": 100, "solved": False, "files": []},
+            {"id": 20, "name": "dynamic", "category": "web", "type": "dynamic_iac",
+             "points": 100, "solved": False, "files": []},
+        ]
+        official = ModuleType("main")
+        solver = ModuleType("parallel_failure_solver")
+        solver.build_prompt = lambda ch, cdir, filenames, conn: ch["name"]
+        solver.run_bash = lambda cmd: "unused"
+        results = []
+
+        def solve_challenge(client, ch, max_steps):
+            return {
+                "id": ch["id"], "name": ch["name"], "category": ch["category"],
+                "type": ch["type"], "had_files": False, "had_instance": True,
+                "seconds": 0.0, "solved": True, "steps": 1,
+                "model_calls": 1, "tool_calls": 0,
+            }
+
+        solve_challenge.__module__ = "parallel_failure_solver"
+        official.solve_challenge = solve_challenge
+        official.is_practice = lambda ch: False
+
+        class Client:
+            created = 0
+
+            def __init__(self, base, token):
+                type(self).created += 1
+                self.worker = type(self).created > 1
+
+            def list_challenges(self):
+                return [dict(item) for item in challenges]
+
+            def challenge(self, cid):
+                if self.worker and cid == 10:
+                    raise OSError("sensitive upstream detail")
+                return dict(next(item for item in challenges if item["id"] == cid))
+
+        official.CTFdClient = Client
+
+        def inherited_main():
+            client = official.CTFdClient("base", "token")
+            targets = client.list_challenges()
+            targets.sort(key=lambda item: item["id"])
+            for brief in targets:
+                results.append(official.solve_challenge(
+                    client, client.challenge(brief["id"]), 4
+                ))
+            return 0
+
+        official.main = inherited_main
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {"main": official, "parallel_failure_solver": solver}
+        ), patch.dict(os.environ, {
+            "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+        }, clear=True), patch.object(
+            arena_main._OuterCoordinator, "should_continue", return_value=False
+        ):
+            self.assertEqual(arena_main.main(), 0)
+
+        self.assertEqual([result["id"] for result in results], [20, 10])
+        self.assertFalse(results[1]["solved"])
+        self.assertEqual(results[1]["error"], "OSError: attempt crashed")
+        self.assertNotIn("sensitive", results[1]["error"])
+
+    def test_deferred_challenges_do_not_fetch_full_details(self):
+        calls = []
+
+        class Delegate:
+            def list_challenges(self):
+                return [
+                    {"id": 131, "name": "first", "type": "standard", "points": 100},
+                    {"id": 132, "name": "later", "type": "dynamic_iac", "points": 100},
+                ]
+
+            def challenge(self, challenge_id):
+                calls.append(challenge_id)
+                return {"id": challenge_id, "name": "real detail", "type": "standard"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            state = arena_main.RuntimeState(os.path.join(directory, "state.sqlite3"))
+            coordinator = arena_main._OuterCoordinator()
+            client = arena_main._RankedClient(
+                Delegate(), state, arena_main._CatalogueCache(crowd_source=lambda: {}),
+                defer_details=lambda: coordinator.pass_slices > 0,
+            )
+            client.list_challenges()
+            self.assertEqual(client.challenge(131)["name"], "real detail")
+            coordinator.admit(4)
+            self.assertEqual(client.challenge(132)["name"], "later")
+            self.assertEqual(calls, [131])
+
+    def test_first_look_is_bounded_but_revisits_keep_configured_budget(self):
+        self.assertEqual(arena_main._slice_steps(24, 0, 131, False), 12)
+        self.assertEqual(arena_main._slice_steps(24, 0, 95, False), 16)
+        self.assertEqual(arena_main._slice_steps(24, 1, 131, False), 24)
+        self.assertEqual(arena_main._slice_steps(24, 0, 131, True), 24)
+        self.assertEqual(arena_main._slice_steps(6, 0, 131, False), 6)
+
     def test_attempt_failures_do_not_stop_the_outer_queue(self):
         for error in (
             "model request failed",
@@ -276,6 +503,7 @@ class ArenaSelectionTests(unittest.TestCase):
             {"main": official, "budget_cycle_solver": solver},
         ), patch.dict(os.environ, {
             "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+            "ONLY_IDS": "1",
         }, clear=True), patch("arena_main.time.sleep"):
             self.assertEqual(arena_main.main(), 0)
 
@@ -417,7 +645,7 @@ class ArenaSelectionTests(unittest.TestCase):
         ):
             self.assertEqual(arena_main.main(), 0)
 
-        self.assertEqual(detail_ids, [3, 2, 1])
+        self.assertEqual(detail_ids, [3])
         self.assertEqual(delegated_ids, [3])
         self.assertEqual(len(results), 3)
         self.assertIn("queue reschedule", results[1]["error"])
@@ -544,6 +772,7 @@ class ArenaSelectionTests(unittest.TestCase):
                     "LLM_BASE_URL": "https://openrouter.ai/api/v1",
                     "LLM_MODEL": "openai/integration-model",
                     "LLM_API_KEY": "secret",
+                    "ONLY_IDS": "1",
                     "MODEL_BUDGET_PATH": os.path.join(directory, "budget.sqlite3"),
                     "MODEL_BUDGET_USD": "1",
                     "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
@@ -607,7 +836,7 @@ class ArenaSelectionTests(unittest.TestCase):
         self.assertIs(solver.build_prompt, original_builder)
         self.assertIs(solver.run_bash, original_shell)
 
-    def test_all_solved_catalogue_runs_official_main_once(self):
+    def test_explicit_selector_all_solved_catalogue_runs_official_main_once(self):
         challenges = [{
             "id": 1, "name": "solved", "category": "misc", "type": "standard",
             "points": 100, "solved": True, "files": [],
@@ -654,6 +883,7 @@ class ArenaSelectionTests(unittest.TestCase):
             }
         ), patch.dict(os.environ, {
             "RUNTIME_STATE_PATH": os.path.join(directory, "state.sqlite3"),
+            "ONLY_IDS": "1",
         }, clear=True):
             self.assertEqual(arena_main.main(), 0)
 
@@ -673,7 +903,10 @@ class ArenaSelectionTests(unittest.TestCase):
 
         def solve_challenge(client, ch, max_steps):
             attempts.append(ch["id"])
-            return {"solved": True, "model_calls": 1, "tool_calls": 0}
+            return {
+                "solved": False, "model_calls": 1, "tool_calls": 0,
+                "error": "model budget exhausted",
+            }
 
         solve_challenge.__module__ = "recovering_catalogue_solver"
         official.solve_challenge = solve_challenge

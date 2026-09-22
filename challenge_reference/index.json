@@ -1,0 +1,422 @@
+[
+  {
+    "artifacts": [
+      {
+        "name": "00-APKlog.zip",
+        "sha256": "dc2cd4176c2d6ff38a7e2c8d0ae246ca0f92209a85351ec1b6526be8656982f2"
+      }
+    ],
+    "category": "healthcare",
+    "id": 3,
+    "name": "BadLE",
+    "type": "standard"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-cgm_ble_log.txt",
+        "sha256": "4bc0a67815216988229cc1e2183bf7d5d4de4ab8008fdc2e38f7cfcb10680630"
+      },
+      {
+        "name": "01-APKlog.zip",
+        "sha256": "dc2cd4176c2d6ff38a7e2c8d0ae246ca0f92209a85351ec1b6526be8656982f2"
+      }
+    ],
+    "category": "healthcare",
+    "id": 4,
+    "name": "BadLE Hard",
+    "type": "standard"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-session.json",
+        "sha256": "7f974a6a59de8eecf71f3dceb991381dd482f1a9db97365318ff7dd5869b4058"
+      }
+    ],
+    "category": "crypto",
+    "id": 13,
+    "name": "Rolling Thunder",
+    "type": "standard"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 27,
+    "name": "Hall Of Mirrors",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-sticky-notes-handout.zip",
+        "sha256": "55224a6e704cdd5747376de5987f279fea2ac9529c17349ef3527bed30d854a1"
+      }
+    ],
+    "category": "pwn",
+    "id": 29,
+    "name": "Sticky Notes",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "pwn",
+    "id": 30,
+    "name": "Kiosk Mode",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "crypto",
+    "id": 32,
+    "name": "Padding Roulette",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "misc",
+    "id": 34,
+    "name": "Signal Lost",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "misc",
+    "id": 35,
+    "name": "Pattern Storm",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "blockchain",
+    "id": 36,
+    "name": "Reentry",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 44,
+    "name": "PatchParade",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-study.dcm",
+        "sha256": "3ae0fa351ab6fd64f37809a08bfff202343ee7526190d66903c145629a0b7d99"
+      }
+    ],
+    "category": "forensics",
+    "id": 55,
+    "name": "Preamble Lies",
+    "type": "standard"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-study_tampered.dcm",
+        "sha256": "da19fa17701dd977b27199df411fa186aeb1b62a426df72f27ed043dcc23b782"
+      },
+      {
+        "name": "01-study_original.dcm",
+        "sha256": "dd3d01bd872820920d60c3483cce8b1846b9e49c123e4cea0adc7d77393dba1b"
+      }
+    ],
+    "category": "forensics",
+    "id": 56,
+    "name": "Tag Youre It",
+    "type": "standard"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-cms8000_firmware.bin",
+        "sha256": "8a2d8e2164b10b8b6c8f16b4af9a444193113cd1053264a63c8dc966d31f3145"
+      }
+    ],
+    "category": "forensics",
+    "id": 57,
+    "name": "Phone Home",
+    "type": "standard"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-hospital_capture.pcap",
+        "sha256": "5ff0b026ee31202172d3e33d2412eecd5c6123c6822f3ebc431406c9edc1c77e"
+      }
+    ],
+    "category": "forensics",
+    "id": 58,
+    "name": "Packet Autopsy",
+    "type": "standard"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-crackme",
+        "sha256": "8c5f1b3a63de2bf4a12f5ab2ffa4aa1f5e47ac8ff7990f771ae35077a3087afc"
+      },
+      {
+        "name": "01-crackme.c",
+        "sha256": "c45eaa7de42e303220e55567aeab24d788a6e5d231464feac298c8aeddf8eb32"
+      },
+      {
+        "name": "02-build.sh",
+        "sha256": "9bb4de82bc4aebbca19b183eb3e4df1f7b90603a5e3fde280ae1847bab4c67c1"
+      }
+    ],
+    "category": "rev",
+    "id": 59,
+    "name": "Stripped Shipped",
+    "type": "standard"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 64,
+    "name": "Injection Ward",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 66,
+    "name": "Cross Enterprise Leak",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "pwn",
+    "id": 67,
+    "name": "Segment Fault",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "crypto",
+    "id": 70,
+    "name": "Chacha Slide",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "pwn",
+    "id": 73,
+    "name": "Echo Valley",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 74,
+    "name": "Whose Chart",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 78,
+    "name": "Bad Medicine",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 81,
+    "name": "Token Of Trust",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 82,
+    "name": "Trust Fall",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "web",
+    "id": 83,
+    "name": "Implicit Trust",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "rev",
+    "id": 86,
+    "name": "Bad Firmware",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "misc",
+    "id": 87,
+    "name": "The Gauntlet",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-vault",
+        "sha256": "15d9888d7ed9a9742a7b046be88acf839849e570fb138250f53c5edc49029d6d"
+      }
+    ],
+    "category": "pwn",
+    "id": 95,
+    "name": "Vault",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-relay-handout.zip",
+        "sha256": "3157eee05dd7410f7b8f57e8cf8061b9e5187882f3c67ca02fc87e1f42cb9501"
+      }
+    ],
+    "category": "pwn",
+    "id": 96,
+    "name": "Relay",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "crypto",
+    "id": 98,
+    "name": "Twin Primes",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "crypto",
+    "id": 100,
+    "name": "Block Party",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "crypto",
+    "id": 102,
+    "name": "Lucky Draw",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-keymaster",
+        "sha256": "facc593e42909240633f4b1a4422ffc46d4897ba6ed16996e17ea8e6714cb7a5"
+      }
+    ],
+    "category": "rev",
+    "id": 104,
+    "name": "Keymaster",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-checker",
+        "sha256": "552996e8fc412bb03a8dbe75ae7f7e0d270e4bac49d7f9dec8203bd7e7fd9ae4"
+      }
+    ],
+    "category": "rev",
+    "id": 105,
+    "name": "Serial Cipher",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "network",
+    "id": 110,
+    "name": "Wire Protocol",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "blockchain",
+    "id": 111,
+    "name": "Overdraft",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "blockchain",
+    "id": 112,
+    "name": "Takeover",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "pwn",
+    "id": 114,
+    "name": "Double Vision",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-validator",
+        "sha256": "0c7a15e9c9196a86879b550146f25fa684b8a9debf6083adccc018209e564ea7"
+      }
+    ],
+    "category": "rev",
+    "id": 116,
+    "name": "Matrix Key",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "network",
+    "id": 118,
+    "name": "Multiplex",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "crypto",
+    "id": 119,
+    "name": "Small World",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "crypto",
+    "id": 120,
+    "name": "Nonce Twice",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [
+      {
+        "name": "00-spool-handout.zip",
+        "sha256": "b9a03bc61a013e085e7e9295d8b55a624279abd33bd9693eb638ba9f97ea25ed"
+      }
+    ],
+    "category": "pwn",
+    "id": 123,
+    "name": "Spool",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "misc",
+    "id": 124,
+    "name": "Tallygate",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "rev",
+    "id": 125,
+    "name": "Sealed Element",
+    "type": "dynamic_iac"
+  },
+  {
+    "artifacts": [],
+    "category": "misc",
+    "id": 126,
+    "name": "Tideglass",
+    "type": "dynamic_iac"
+  }
+]

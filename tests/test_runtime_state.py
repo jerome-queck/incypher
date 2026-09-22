@@ -93,6 +93,21 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertEqual(self.store.project(changed_material).record_count, 0)
         self.assertEqual(self.store.project(changed_instance).record_count, 0)
 
+    def test_dynamic_invariant_findings_transfer_not_raw_outputs(self):
+        finding = Finding(FindingKind.OBSERVED, "The parser checks length before decoding.")
+        self.store.checkpoint_finding(self.finding_context(self.dynamic), finding)
+        self.store.record_command(self.dynamic, "synthetic inspect", "synthetic private output", "ok")
+        next_instance = Scope(8, "material-b", ChallengeKind.DYNAMIC, "instance-b")
+        context = self.finding_context(next_instance)
+        projection = self.store.project_invariant_findings(context)
+        self.assertEqual(projection.record_count, 1)
+        self.assertIn(finding.summary, projection.text)
+        self.assertNotIn("synthetic private output", projection.text)
+        self.assertEqual(self.store.project_invariant_findings(
+            self.finding_context(Scope(8, "different", ChallengeKind.DYNAMIC, "instance-b"))
+        ).record_count, 0)
+        self.assertEqual(self.store.project_invariant_findings(self.static).record_count, 0)
+
     def test_command_dedupe_is_scope_specific(self):
         self.assertTrue(self.store.record_command(self.static, "id", "uid=1", "identity checked"))
         self.assertTrue(self.store.command_seen(self.static, "id"))
@@ -256,11 +271,99 @@ class RuntimeStateTests(unittest.TestCase):
             {"id": 1, "points": 500, "type": "standard", "solves": 0},
             {"id": 2, "points": 100, "type": "standard", "solves": 0},
         ]
-        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 2)
-        self.store.record_challenge_outcome(2, False, 1, "unsolved", now=10)
-        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 1)
+        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 1)
+        self.store.record_challenge_outcome(1, False, 1, "unsolved", now=10)
+        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 2)
 
-    def test_crowd_hint_offsets_at_most_two_retries_without_starving_new_work(self):
+    def test_proven_500_point_exploits_lead_both_lanes_without_starving_others(self):
+        briefs = [
+            {"id": 95, "points": 100, "type": "dynamic_iac"},
+            {"id": 96, "points": 500, "type": "dynamic_iac"},
+            {"id": 123, "points": 500, "type": "dynamic_iac"},
+            {"id": 4, "points": 500, "type": "standard"},
+            {"id": 13, "points": 500, "type": "standard"},
+            {"id": 104, "points": 100, "type": "dynamic_iac"},
+        ]
+        ordered = self.store.rank_briefs(briefs, now=10)
+        self.assertEqual([item["id"] for item in ordered[:2]], [96, 123])
+        self.store.record_challenge_outcome(96, False, 1, "unsolved", now=10)
+        ordered = self.store.rank_briefs(briefs, now=13)
+        self.assertEqual(ordered[0]["id"], 123)
+        self.assertIn(96, [item["id"] for item in ordered])
+
+    def test_verified_local_method_gets_bounded_early_attention(self):
+        briefs = [
+            {"id": i, "points": 100, "type": "standard"}
+            for i in (1, 2, 5, 6, 7, 8, 9, 10)
+        ] + [{"id": 55, "points": 100, "type": "standard"}]
+        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 55)
+        self.store.record_challenge_outcome(55, False, 1, "unsolved", now=10)
+        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 1)
+        for offset, cid in enumerate((1, 2, 5)):
+            self.store.record_challenge_outcome(cid, False, 1, "unsolved", now=13 + offset)
+        self.assertEqual(self.store.rank_briefs(briefs, now=20)[0]["id"], 55)
+        self.store.record_challenge_outcome(55, False, 1, "unsolved", now=20)
+        self.assertEqual(self.store.rank_briefs(briefs, now=23)[0]["id"], 6)
+
+    def test_proven_dynamic_retry_is_bounded_by_three_fresh_slices(self):
+        briefs = [{"id": 95, "points": 100, "type": "dynamic_iac"}] + [
+            {"id": cid, "points": 100, "type": "dynamic_iac"}
+            for cid in range(200, 241)
+        ]
+        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 95)
+        self.store.record_challenge_outcome(95, False, 1, "unsolved", now=10)
+        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 200)
+        for offset, cid in enumerate((200, 201, 202)):
+            self.store.record_challenge_outcome(cid, False, 1, "unsolved", now=13 + offset)
+            ranked = self.store.rank_briefs(briefs, now=20 + offset)
+            self.assertEqual(ranked[0]["id"], 95 if offset == 2 else cid + 1)
+        self.store.record_challenge_outcome(95, False, 1, "unsolved", now=23)
+        self.assertEqual(self.store.rank_briefs(briefs, now=26)[0]["id"], 203)
+
+    def test_proven_dynamic_retry_precedes_unknown_static_after_fair_gap(self):
+        briefs = [
+            {"id": 95, "points": 100, "type": "dynamic_iac"},
+            {"id": 131, "points": 100, "type": "standard"},
+        ] + [{"id": cid, "points": 100, "type": "dynamic_iac"}
+             for cid in (200, 201, 202, 203)]
+        self.store.rank_briefs(briefs, now=10)
+        self.store.record_challenge_outcome(95, False, 1, "unsolved", now=10)
+        for offset, cid in enumerate((200, 201, 202)):
+            self.store.record_challenge_outcome(cid, False, 1, "unsolved", now=13 + offset)
+        self.assertEqual(self.store.rank_briefs(briefs, now=20)[0]["id"], 95)
+        self.store.record_challenge_outcome(95, False, 1, "unsolved", now=20)
+        self.assertEqual(self.store.rank_briefs(briefs, now=23)[0]["id"], 131)
+        self.store.record_challenge_outcome(131, False, 1, "unsolved", now=23)
+        self.assertEqual(self.store.rank_briefs(briefs, now=26)[0]["id"], 203)
+
+        with tempfile.TemporaryDirectory() as directory:
+            failed = RuntimeState(Path(directory) / "provider.sqlite3")
+            failed.rank_briefs(briefs, now=10)
+            failed.record_challenge_outcome(95, False, 0, "provider", now=10)
+            for offset, cid in enumerate((200, 201, 202)):
+                failed.record_challenge_outcome(cid, False, 1, "unsolved", now=13 + offset)
+            self.assertEqual(failed.rank_briefs(briefs, now=20)[0]["id"], 131)
+            failed.record_challenge_outcome(131, False, 1, "unsolved", now=20)
+            self.assertEqual(failed.rank_briefs(briefs, now=23)[0]["id"], 203)
+
+    def test_proven_dynamic_precedes_unknown_static_sweep(self):
+        briefs = [
+            {"id": 74, "points": 100, "type": "dynamic_iac"},
+            {"id": 10, "points": 500, "type": "standard"},
+            {"id": 11, "points": 100, "type": "standard"},
+            {"id": 95, "points": 100, "type": "dynamic_iac"},
+        ]
+        self.assertEqual(self.store.rank_briefs(briefs, now=10)[0]["id"], 95)
+        self.store.record_challenge_outcome(95, False, 1, "unsolved", now=10)
+        self.assertEqual(self.store.rank_briefs(briefs, now=13)[0]["id"], 10)
+        self.store.record_challenge_outcome(10, False, 1, "unsolved", now=13)
+        self.assertEqual(self.store.rank_briefs(briefs, now=16)[0]["id"], 11)
+        self.store.record_challenge_outcome(11, False, 1, "unsolved", now=16)
+        self.assertEqual(self.store.rank_briefs(briefs, now=19)[0]["id"], 74)
+        self.store.record_challenge_outcome(74, False, 1, "unsolved", now=19)
+        self.assertEqual(self.store.rank_briefs(briefs, now=22)[0]["id"], 95)
+
+    def test_static_sweep_precedes_bounded_crowd_retry_credit(self):
         briefs = [
             ChallengeBrief(1, 100, ChallengeKind.STATIC, "m1", crowd_solves=2),
             ChallengeBrief(2, 100, ChallengeKind.STATIC, "m2"),
@@ -268,9 +371,13 @@ class RuntimeStateTests(unittest.TestCase):
         self.store.checkpoint_outcome(briefs[0].scope, AttemptOutcome.UNSOLVED, now=10)
         self.assertEqual(self.store.rank(briefs, now=10.1)[0].brief.challenge_id, 2)
         ranked = self.store.rank(briefs, now=100)
-        self.assertEqual([item.brief.challenge_id for item in ranked], [1, 2])
+        self.assertEqual([item.brief.challenge_id for item in ranked], [2, 1])
+        self.store.checkpoint_outcome(briefs[1].scope, AttemptOutcome.UNSOLVED, now=100)
+        self.assertEqual(self.store.rank(briefs, now=100.1)[0].brief.challenge_id, 1)
         self.store.checkpoint_outcome(briefs[0].scope, AttemptOutcome.UNSOLVED, now=101)
         self.store.checkpoint_outcome(briefs[0].scope, AttemptOutcome.UNSOLVED, now=102)
+        self.assertEqual(self.store.rank(briefs, now=1000)[0].brief.challenge_id, 1)
+        self.store.checkpoint_outcome(briefs[0].scope, AttemptOutcome.UNSOLVED, now=103)
         ranked = self.store.rank(briefs, now=1000)
         self.assertEqual([item.brief.challenge_id for item in ranked], [2, 1])
 
@@ -278,7 +385,7 @@ class RuntimeStateTests(unittest.TestCase):
         briefs = [
             {"id": 1, "points": 100, "type": "standard", "solves": True},
             {"id": 2, "points": 100, "type": "standard", "solves": -1},
-            {"id": 3, "points": 100, "type": "standard", "solves": "99"},
+            {"id": 133, "points": 100, "type": "standard", "solves": "99"},
             {"id": 4, "points": 100, "type": "standard"},
             {
                 "id": 5,
@@ -289,7 +396,7 @@ class RuntimeStateTests(unittest.TestCase):
             },
         ]
         ordered = self.store.rank_briefs(briefs, now=10)
-        self.assertEqual([brief["id"] for brief in ordered], [5, 1, 2, 3, 4])
+        self.assertEqual([brief["id"] for brief in ordered], [5, 1, 2, 4, 133])
 
     def test_catalogue_crowd_solves_do_not_change_scope_hash(self):
         low = {"id": 7, "points": 100, "type": "standard", "solves": 1}

@@ -17,17 +17,45 @@ the first request; that resolved identity is then exact. The image-owned
 `xhigh` allowlist contains only Luna and Sol: exact real-key tool requests
 for each succeeded on 22 Sep. Catalogue metadata alone advertises the
 reasoning field, not permitted effort values; never infer `xhigh` for another
-model from that field. The image-owned
-OpenRouter/Luna policy chooses the exact `openai/gpt-5.6-sol` model at a new slice
-after at least two trusted
-unsolved slices only when Sol's exact catalogue entry supports tools and
-reasoning, has known pricing, is not ahead of the spend target and its
-conservative reservation fits. An empty `LLM_HARD_MODEL` disables Sol;
+model from that field. The scored Day-2 image marks only its discoverable
+image default for Sol-first routing; a pre-scored Day-1 image waits for one
+trusted unsolved slice. In either case, the image-owned OpenRouter/Luna policy
+chooses exact `openai/gpt-5.6-sol` at a new slice when Sol's exact catalogue
+entry supports tools and reasoning, has known pricing, and its conservative
+reservation fits, even when cumulative spend is ahead of the soft target. The configured image
+default remains Luna for capability/price/budget fallback; the effective
+first choice is Sol under those gates. An empty `LLM_HARD_MODEL` disables Sol;
 any other value disables this route. If an interleaved ledger reservation
 denies the first Sol call, Brain tries Luna before dispatch. Otherwise Luna
-remains selected. Each slice
-uses one model for all turns. The gateway performs one finite-timeout transport call
+remains selected when any gate refuses Sol. Each slice
+uses one model for all turns. Image-owned Sol or fallback Luna requests use xhigh
+when their exact OpenRouter catalogue entry supports reasoning, regardless of
+soft spend posture; the durable USD 85 admission ceiling still applies. The
+gateway performs one finite-timeout transport call
 and never automatically retries a paid request.
+
+For the discoverable image-owned OpenRouter route only, Brain may make one
+client-side first-turn availability failover to exact
+`google/gemini-3.1-pro-preview-customtools` after an explicit HTTP 404, 429 or 503.
+It first requires a fresh exact catalogue entry with tool and completion-limit
+capabilities and known pricing, a separate conservative ledger reservation,
+at least three model-call slots in the slice and time before the trusted attempt
+deadline. The final physical model call retains the submission/checkpoint-only
+tool offer when that callback exists; one- or two-call slices fail closed.
+The original reservation remains unresolved because a returned HTTP error does
+not prove it was unbilled. Once a model returns an assistant turn, that slice
+never changes identity. Explicit runtime models, other endpoints, structured
+refusals, moderation responses, transport exceptions, deadlines and ambiguous
+errors do not trigger failover. We do not send OpenRouter's server-side `models`
+fallback parameter: its documented behavior includes moderation refusals and
+would hide per-attempt cost/identity decisions. This route is availability
+recovery, not a means to avoid safety refusals or evidence of equal solve quality.
+Google documents the Custom Tools variant for bash/custom-tool workflows;
+OpenRouter listed it with tool support and $2/$12 per million input/output
+tokens on 22 Sep, and a content-free authenticated tool-call probe returned
+the exact model, a tool call and usage. [Google model](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview),
+[OpenRouter model](https://openrouter.ai/google/gemini-3.1-pro-preview-customtools),
+[OpenRouter fallback behavior](https://openrouter.ai/docs/guides/routing/model-fallbacks).
 
 The gateway enforces its own caller-return deadline with a daemon transport worker even
 when an injected transport ignores its timeout argument. Python cannot safely cancel a
@@ -69,8 +97,10 @@ response, the ledger counts upstream inference cost plus any OpenRouter charge;
 unresolved at the full reservation instead of settling zero or a lower list
 estimate. This bounds admission but cannot mathematically rule out one
 provider charge above its reservation. The durable ledger defaults to `/work/model-budget.sqlite3`, an USD 85
-admission ceiling and USD 1 opaque-price reservations, leaving USD 15 of the competition
-allowance unadmitted for recovery/verification. The ceiling cannot exceed USD 85; opaque
+admission ceiling and USD 1 opaque-price reservations. This was designed against
+the earlier briefing's USD 100 allowance, but today's live site has not confirmed
+a numeric scored-day OpenRouter cap; it is not a verified USD 15 reserve against
+the organiser's actual balance. The ceiling cannot exceed USD 85; opaque
 reservations must remain USD 0.05–5. Optional environment tuning is bounded;
 Day 2 requires the organiser's injected endpoint/key plus the authoritative
 [provider-discovery policy](provider-discovery.md).
@@ -78,7 +108,8 @@ Day 2 requires the organiser's injected endpoint/key plus the authoritative
 The ledger also stores its first-start wall time. Arena mode compares durable measured,
 estimated and unresolved spend, plus the next conservative reservation, with a linear
 budget target over `MODEL_BUDGET_WINDOW_SECONDS` (default 23,400 seconds). It requests
-high reasoning while starting, on pace or behind, and medium while materially ahead;
+high reasoning while starting, on pace or behind, and medium while materially ahead
+for other supported models;
 completion capacity stays 4,096 by default. Only an exact OpenRouter model whose
 catalogue advertises a valid >=8,192-token ceiling and known price may request
 8,192 when adaptive pacing remains behind target after pricing the expanded next

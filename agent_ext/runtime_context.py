@@ -315,6 +315,12 @@ def bind_prepared_material(
             digest, size = _hash_file(candidate)
         except OSError:
             records.append((candidate.name, "unavailable"))
+        except ValueError as exc:
+            if str(exc) != "trusted material file exceeds hash limit":
+                raise
+            # Still hand the downloaded file to the inherited solver. An un-hashed
+            # oversized file cannot safely reuse findings from another attempt.
+            records.append((candidate.name, "oversize", current.attempt_id))
         else:
             records.append((candidate.name, digest, size))
     material = _digest(

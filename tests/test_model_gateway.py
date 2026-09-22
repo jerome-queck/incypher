@@ -1,4 +1,5 @@
 import json
+import queue
 import tempfile
 import threading
 import time
@@ -198,6 +199,29 @@ class RequestTests(unittest.TestCase):
         while gateway.dispatch_active and time.monotonic() < deadline:
             time.sleep(0.005)
         self.assertFalse(gateway.dispatch_active)
+
+    def test_completed_outcome_allows_next_call_before_worker_exits(self):
+        release = threading.Event()
+        original_put = queue.Queue.put
+        calls = []
+
+        def linger_after_put(target, item, *args, **kwargs):
+            original_put(target, item, *args, **kwargs)
+            release.wait(1)
+
+        def transport(endpoint, headers, body, timeout):
+            calls.append(json.loads(body)["model"])
+            return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+        gateway = ModelGateway(transport, timeout_seconds=1)
+        try:
+            with patch.object(queue.Queue, "put", linger_after_put):
+                gateway.complete(self.identity, self.messages, ProviderCapabilities())
+                self.assertFalse(gateway.dispatch_active)
+                gateway.complete(self.identity, self.messages, ProviderCapabilities())
+            self.assertEqual(calls, ["injected/model", "injected/model"])
+        finally:
+            release.set()
 
 
 class LedgerTests(unittest.TestCase):

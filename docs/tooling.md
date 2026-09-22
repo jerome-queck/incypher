@@ -53,13 +53,23 @@ The coordinator fingerprints raw commands/output in memory, stores only sanitize
 summaries, and rejects an exact same-scope replay. Static evidence requires the same material
 hash; dynamic evidence also requires the same instance-generation hash. See
 [runtime-state.md](runtime-state.md).
+The separate private output vault retains bounded exact shell results on `/work` for
+same-scope continuation. Brain previews recent captures and can read one by handle
+without rerunning it; this does not change the sanitized coordinator database.
+The image also contains `/opt/agent/challenge_reference`: a no-secret 47-ID
+index, attachment hashes and evidence-level summary. Trusted numeric IDs select
+the detailed method text from `agent_ext/challenge_methods.py`. Raw local
+analysis, values and artifacts are not copied into the image.
 
-The image also packages hash-pinned `pydicom` for offline DICOM metadata and
-`scapy` for local capture analysis. Brain advertises
+The image also packages hash-pinned `pydicom` for offline DICOM metadata,
+`scapy` for local capture analysis, Pillow for pixel inspection, `pypdf`
+for PDF structure, Z3 for symbolic constraints and `lxml` for HTML/XML parsing.
+Debian-packaged `tesseract`, Poppler utilities, ExifTool, 7-Zip and `jq`
+provide general OCR/PDF/metadata/archive/JSON inspection. Brain advertises
 `agent_ext.scapy_offline.summarize_pcap` through the existing supervised shell;
 that convenience wrapper reads at most 257 packets, reports at most 256 and
 previews at most 256 payload bytes per packet without interface discovery.
-It does not sniff or send traffic. These packages do not alter the trusted
+It does not sniff or send traffic. These tools do not alter the trusted
 connection scope, tool-call limits or one-dynamic-instance lifecycle.
 
 ### Fixed inspections

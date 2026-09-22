@@ -4,6 +4,7 @@ set -eu
 day1_llm_env_file=${DAY1_LLM_ENV_FILE:-/opt/agent/.day1-llm.env}
 unset LLM_MODEL_AUTO_DISCOVER
 unset LLM_ROUTING_ENABLED
+unset LLM_SOL_FIRST
 
 # The organiser's complete runtime configuration always wins. A partial runtime
 # configuration is left untouched so the Brain reports it instead of mixing providers.
@@ -28,7 +29,8 @@ if [ -z "${LLM_MODEL+x}" ] && \
     LLM_MODEL=$ARENA_DEFAULT_LLM_MODEL
     LLM_MODEL_AUTO_DISCOVER=1
     LLM_ROUTING_ENABLED=1
-    export LLM_MODEL LLM_MODEL_AUTO_DISCOVER LLM_ROUTING_ENABLED
+    LLM_SOL_FIRST=1
+    export LLM_MODEL LLM_MODEL_AUTO_DISCOVER LLM_ROUTING_ENABLED LLM_SOL_FIRST
 fi
 unset ARENA_DEFAULT_LLM_MODEL
 

@@ -16,8 +16,8 @@ values override the file. `doctor` reports presence only, not validity or secret
 | `TEAM_ID` | Team identity; this repo is Team 63 |
 | `CTF_BASE` | Official challenge platform, prefilled |
 | `CTF_TOKEN` | Settings → Access Tokens on platform; trusted API client + registry login |
-| `LLM_BASE_URL` | Own provider's OpenAI-compatible base or full `/chat/completions` URL |
-| `LLM_MODEL` | Provider-supported tool-calling model for local API practice/Day 1 |
+| `LLM_BASE_URL` | For pre-scored arena runs, `https://openrouter.ai/api/v1`; other LLM providers are blocked by current arena routing |
+| `LLM_MODEL` | Endpoint-served tool-calling model for local API practice/pre-scored runs |
 | `LLM_API_KEY` | Provider API key; never a Codex login/access token |
 | `MAX_STEPS` | Model calls per challenge slice, integer 1–150; packaged default 24 |
 | `MAX_TOOL_CALLS`, `MAX_SUBMISSIONS` | Local per-slice tool/submission bounds; packaged defaults 28/3 |
@@ -109,8 +109,9 @@ Checkers without a token are structural only. Practice can spend provider credit
 
 ## Day-1 release
 
-The live guide permits your own model and injects no model variables. This implementation
-therefore needs a compatible provider API key, except for a future scripted solver that
+The live guide permits your own OpenRouter-served model and injects no model variables
+before scoring. This implementation therefore needs an OpenRouter API key, except
+for a future scripted solver that
 never calls a model. Codex is not installed in the base and its login is not transported
 by Docker. A subscription-backed remote image is neither implemented nor established
 as compatible with organiser accounting/sandbox constraints.
@@ -155,8 +156,9 @@ Complete before the user-confirmed 22 Sep 10:00 SGT start:
 5. When release is requested, run `push --phase day2` once. It rejects images retaining
    the Day-1 credential file or validation selector, then pushes Team 63's `:latest`.
 6. Observe status and VALID scores without interacting with the solver. Record the
-   deployed digest/last-push time and whether the arena collected results. During
-   scoring, a newer push or organiser restart can incur penalties.
+   deployed digest/last-push time and whether the arena collected results. The live
+   usage guide currently makes the first three scored-day re-uploads free, then
+   charges 100 points per push; organiser restarts may separately incur penalties.
 
 Commands are in [README](../README.md#practice-and-submission). `push` does not build or
 run the checker for you. Release authorization is separate from ordinary Git work;

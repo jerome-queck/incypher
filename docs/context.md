@@ -4,6 +4,243 @@ Updated 22 September 2026. Read this first on a new task, after compaction, or b
 assigning a bounded subtask. Rules live in [competition-rules.md](competition-rules.md);
 machine commands live in [setup.md](setup.md).
 
+## Current release and next action
+
+Postmortem audit, 22 Sep (local, synthetic; release timeline below is historical):
+the checked #34 and #35 image files match this working tree on the audited
+runtime paths, except #34's earlier `runtime_state.py`. The clean Git baseline
+`933c1e8` and exact #35 image both reproduce command reread deduplication,
+pre-execution refusal deduplication, false progress from nonzero shell results,
+rejected benign findings, and an 85-call stop **when** cost and pricing are
+unavailable. The #35 image also kills a noisy computation at 12 KB. Cross-instance
+semantic finding transfer and private bounded output recall are present in #34/#35,
+so the postmortem's blanket loss-of-progress claim is only partly current.
+The generic `flag{...}` description conflicts with the official
+`INCYPHER{...}` format; a real mismatch is unproved. The inactive fixed-inspection
+snapshot test passed 12/12 in the #35 Linux image. These probes do not identify
+the cause of missed arena solves. Evidence seams: [shell wrapper](../arena_main.py),
+[state](../agent_ext/runtime_state.py), [shell](../agent_ext/managed_shell.py),
+[findings](../agent_ext/runtime_context.py), [budget](../agent_ext/model_gateway.py).
+**Next action:** if attribution is needed, obtain sanitized #34/#35 run outcomes,
+model-cost metadata and consistent ledger backups; no registry push follows from
+this audit.
+
+At 22 Sep 15:57:05 SGT, user-authorized 500-point-priority push **#35**
+registered. The remote manifest matches the tested AMD64 digest
+`sha256:8896c31d913226cc3c14f768e1219fbe332f627b625e740132150938ebb9f2f6`.
+The public board charged the expected second 100-point re-upload penalty:
+6 VALID / 750, **550 NET**, last own solve BadLE at 15:36. The #35 image
+keeps #34's verified large-file fix and promotes locally reproduced unsolved
+500-point methods **Relay #96** and **Spool #123** ahead of lower-value work;
+remaining queue tiers sort trusted points descending. A fresh read-only
+Team 63 catalogue ranked #96 and #123 first. Host suite 422 passed/31 skipped;
+restricted exact-image suite 422 passed; checker 6/0/2; changed source hashes
+matched the image; no Day-1 credential, private directory, validation selector
+or challenge flag literal was packaged. After the 16:00 cycle, the public
+resource feed showed a newly started Team 63 agent at about 16:00:09 working
+on **Relay #96**. The board was still `collecting` the prior run; this confirms
+the new queue's first selected challenge, not a solve or active-container
+digest. **Next action:** observe subsequent VALID and instance lifecycle
+without intervening. Do not push again without a distinct authorized reason.
+
+At 22 Sep 15:30:17 SGT, the user-authorized recovery push **#34** registered
+with the expected **-100** re-upload charge; it was `running` at 15:37.
+At **15:36:27**, its run earned a fresh arena-valid **BadLE +250** solve.
+The score board showed **6 VALID / 750 points, 650 NET** after that solve.
+Its independently
+verified registry digest is
+`sha256:93443207dcda6c47516ac0573f54e1e48e5507313330fbbb8ad22a7dc22727a8`.
+This image is the prior #32 source/architecture with one verified large-file
+fix in `agent_ext/runtime_context.py`: an attachment over the 64 MiB hashing
+cap no longer aborts challenge preparation; it remains available to the solver
+under a fresh, non-reused evidence scope. The old exact #32 image failed
+read-only challenge #3 before any model call with `ValueError: attempt crashed`;
+the repaired exact image reached a fake model call on that same authenticated
+read-only challenge detail and downloaded file, without an instance or flag
+submission. Host suite 421 passed/31 skipped; restricted image suite 421 passed;
+checker 6/0/2; no Day-1 credential or validation selector in the package.
+This proves the large-file fix reaches a scored solve, but does not establish
+the unobserved cause of #33's exit 1. **Next action:** allow #34 to continue
+autonomously; check public status and VALID at a meaningful later point, and
+obtain sanitized arena logs if it exits.
+No further registry push is authorized or justified by the offline checks.
+
+At 22 Sep 15:05 SGT, user-authorized Day-2 push #33 initially registered
+`running`, then exited with code 1 and no new solve. Team 63 remained at
+5 VALID / 500 points. Independent
+registry inspection matched the checked AMD64 image digest
+`sha256:de3d5b4e19cd9147453b18b4ff7da5183a3a5ec8ad73dba7403088f105a62110`.
+It was rebuilt in isolated worktree
+`/Users/jeromequeck/.codex/worktrees/baseline-rebuild/incypher` on branch
+`codex/baseline-sol-xhigh` from source `3a3452e`, the exact Day-1 #20 source
+that earned 11 fresh practice solves by 03:25. The clean image retains that
+serial 12-call solver, uses exact Sol/xhigh, and promotes eight unsolved
+locally corroborated methods with required first-execution instructions.
+Host suite: 359 passed/25 expected skips; official image checker 6/0/2;
+restricted image suite 342 passed; all 27 packaged source hashes matched;
+secret/flag audit found no Day-1 credential, private files or real flag
+literal. Push #32 collected `done` at 5/47 and produced no fresh solve.
+These checks and #33 registration do not establish a fresh score or active
+container digest. **Next action:** passively observe a new accepted solve or
+specific failure; no further push without separate authorization. The
+five-minute live-instance automation was deleted at the user's request.
+
+At 22 Sep ~13:08 SGT, public status still shows push #32 `running`, zero
+penalty; Team 63 remains at 5 VALID / 500 points, last solve 11:14. The
+dashboard briefly showed a solver-created Sticky Notes (#29) instance at
+~13:03. Team 63's authenticated read-only instance-status API confirmed it,
+but it disappeared before a separate probe could connect. No instance action,
+connection or flag submission occurred. A no-flag shell probe is staged in
+ignored local analysis for a later solver-created instance. **Next action:**
+continue passive run/score and team-instance monitoring; only probe a current
+Team 63 instance after fresh official status confirmation.
+
+At 22 Sep 12:51 SGT, user-authorized Day-2 push #32 registered with zero
+penalty and the previous 5/47 collected result. The public 12:57:08 cycle
+shows it `running`, with no collected #32 result yet.
+Independent registry inspection matched the exact checked AMD64 manifest
+`sha256:21a96a3d09c928f802893c1ffc8cfa35be808f68cf9b2d615af5b0840701635e`.
+The prior push #31 passed through transient `collecting`/`lost`/`running` public
+labels before collection as `exited(1)` at 5/47. No container logs or active
+digest are exposed, so the cause of exit 1 remains unproven. The public row
+confirms #32 pickup but does not prove the active digest or a new accepted solve.
+
+The #32 image selects one ranked eligible dynamic slice alongside one static
+worker, with a separate client and thread-local shell; inherited `main.py`
+still owns instance lifecycle and results, and only one dynamic is admitted.
+Proven per-ID methods lead their static/dynamic lanes, with a single bounded
+retry after three other completed challenges; unknown fresh work still gets
+first attempts. Image-owned exact OpenRouter routing prefers Sol xhigh when
+catalogue capability, price and durable USD85 admission permit. Only an
+explicit first-call HTTP 404/429/503 can fail over to catalogue-verified Gemini
+3.1 Pro Custom Tools with a fresh reservation; the original stays unresolved.
+Refusals, ambiguous transport failures, timeouts and later calls do not switch
+models. Local real-key content-free Gemini probes verified exact tool calls and
+`reasoning: high`, not scoring or refusal behavior. The package contains 47
+challenge methods (13 locally corroborated) and runtime-only scoped command
+captures, not flags or private files.
+
+Release checks: 421 host tests passed with 31 expected platform skips; 401
+network-disabled non-root tests passed inside the exact read-only 2 CPU/2 GiB/
+256-PID image; bundled checker passed 6/0/2; copied source hashes matched;
+audit found no Day-1 secret, validation selector or match to seven local flag
+candidates. `git diff --check` passed. No manual challenge instance or flag
+submission was made in this task. These checks do not prove scored success.
+**Next action:** passively watch status/VALID for #32 collection and fresh solves;
+if it fails, obtain sanitized run logs/results before attributing a cause.
+Do not spend another push on speculation. The live usage guide now says the
+first three scored-day re-uploads are free, then 100 points each; the previous
+rules audit's stricter sentence was corrected in [competition rules](competition-rules.md).
+
+## Previous challenge-preparation diagnosis
+
+Scoring diagnosis at 22 Sep ~12:22 SGT: two quick authenticated catalogue
+reads found exactly five team solves: four forensics (#55–58) and one reversing
+(#59), unchanged from before push #31. The public row shows #31 registered and
+`running`, but does not expose the active digest, model calls, error results or
+budget. A fresh-state replay of the live 42-unsolved catalogue ranked the
+remaining statics #3, #4 and #13 first. After recording one unsuccessful Vault
+(#95) slice, the current fresh-first policy ranked its next attempt 42nd,
+behind 41 unseen challenges. This is a confirmed scheduling tradeoff, not
+evidence of which live slice failed. Per first look the image permits 12 or 16
+model turns with an 8-minute attempt deadline; repeating up to 42 first looks
+can consume the remaining event window. No category is filtered out. The
+category playbook does, however, map healthcare and blockchain to `unknown`;
+the 47 packaged methods include 13 local proofs and 34 hypotheses/incomplete
+routes, not runnable exploit scripts. The observed short-lived #29 instance
+proves a dynamic lifecycle was reached, but no model/tool or verdict detail.
+**Next action:** obtain a sanitized arena result/attempt trace or other
+read-only runtime telemetry before claiming a provider, budget, tool, or
+submission root cause; if asked to implement, replace the full first-pass
+barrier with a bounded coverage/verified-retry mix and test it before any
+separately authorized push. This turn makes no runtime change or push.
+
+Live-support update at 22 Sep ~12:15 SGT: Push #31 registered on the public
+status board at 12:01:07, with the team row still `running` and zero penalty;
+that row does not reveal the active container digest. The user authorized
+tracking and working on solver-created instances, but not creating instances
+or manually submitting flags. One read-only team-token scan of all 39 dynamic
+status endpoints found Sticky Notes (#29) live briefly; it was gone on the
+next read, and a fresh full scan found no active dynamic instance. No instance
+was created, connected to, renewed, destroyed or submitted to by this task.
+The active five-minute `InCypher live instance support` thread heartbeat will
+continue read-only identification and scoped, separate bounded work on any
+solver-created instance through 16:30 SGT, staying quiet while unchanged.
+**Next action:** wait for the next solver-created live instance, recheck its
+status immediately before any connection, and reuse the matching local
+analysis without exposing flags or target credentials.
+
+Update at 22 Sep 12:02 SGT: user superseded the earlier no-push scope and
+requested a Day-2 solver release after verification. Current candidate
+`incypher-agent:throughput-local` packages the same 47 no-secret methods and
+output vault, plus a fresh-first queue: all static first looks, then dynamic
+first looks, then bounded retries. First looks use 12 model turns, or 16 for
+locally corroborated methods; later slices use the configured 24. Deferred
+challenge details now reuse trusted catalogue metadata instead of fetching
+all details every pass. Exact captures remain private to their instance;
+screened semantic findings alone can transfer to a new instance with the
+same material and an explicit re-verification warning. The inherited serial
+lifecycle still prevents simultaneous static solving and an active dynamic
+instance; it permits one dynamic at a time, not concurrent static/dynamic
+workers. This limitation is not claimed solved. The default durable USD85
+admission ceiling remains unchanged because the live scored balance is not
+confirmed. Host suite: 412 tests, 31 skips; exact AMD64 image checker 6/0/2;
+restricted non-root container 392 non-entrypoint tests and root synthetic
+entrypoint 8 tests; package audit found 47 references and no flag prefix or
+Day-1 secret/selector. The image was pushed once to Team 63 `:latest`; the
+registry independently returned the exact checked AMD64 manifest digest
+`sha256:13d9e3ee6deca1213c8318f51ded163eaf7782785de99c7407d53558df0f515e`.
+Board read at 11:57 showed Team 63 at 5 VALID / 500 points, last solve 11:14,
+zero recorded penalty. Immediately after push the status page still showed
+Team 63's earlier push #30; pickup and new scoring are not yet verified.
+**Next action:** observe the next passive status/score cycle, establish whether
+push #31 is registered and its penalty, and compare fresh VALID without
+claiming the tested image solved anything yet.
+
+Previous scope (superseded for release): inspect the published challenges and attached handouts locally; do not
+launch dynamic instances, submit flags, or publish/push any image. The ignored
+`private/challenges-2026-09-22/manifest.json` indexes 47 exposed challenge detail
+records and 19 attachments with hashes. Some publisher descriptions are sparse or
+truncated; the archive cannot supply missing instance-only behavior. Ignored
+`solves.md` keeps candidate values and uncertainty; never copy it into an image,
+tracked playbook, results, or release log.
+
+`agent_ext/challenge_methods.py` gives all 47 trusted numeric IDs a no-secret
+method or explicit insufficiency note. The image's sanitized
+`challenge_reference/index.json` provides names, categories and attachment
+hashes but no raw outputs or candidate values. Static artifact analysis yielded six
+candidates (BadLE's APK parser is corroborated); BadLE Hard and Rolling Thunder
+remain unresolved. The #4 APK is identical to #3's oximeter app, so cannot
+verify the contradictory CGM field claim. Three reversing inputs were accepted
+by their provided local binaries. Vault (#95) and Relay
+(#96) have locally verified access paths, with reproducible ignored scripts;
+their binary fallback output is not an arena flag. Sticky Notes (#29) and
+Spool (#123) have locally reproduced end-to-end chains; Spool's was verified
+with a synthetic environment value, and its AUDIT recovery token is a decoy.
+The remaining
+dynamic cases are hypotheses only, not live solves. No instance or submission
+was made for this task.
+
+Final local-only Day-2 image `incypher-agent:challenge-methods-local` has AMD64
+digest `sha256:c96797d2fbd54e8da8b8e5cacd57ace641d5b1f0d5b46c162fa6f0894d7e6305`.
+Its checker passed 6/0/2 expected warnings; exact packaged agent files were
+scanned against all locally derived candidate strings with no matches. The
+host offline suite passed 407 tests (31 expected platform skips). In a
+network-disabled, read-only, 2 CPU/2 GiB container, 399 non-entrypoint tests
+passed as non-root with ResourceWarnings fatal; 8 entrypoint tests passed
+separately using the packaged executable and an executable synthetic-fixture
+tmpfs. These checks do not prove live scoring. The image was not pushed.
+
+`agent_ext/output_vault.py` now keeps private, exact-material/instance-scoped,
+bounded shell results on `/work`; Brain can request a prior result by handle
+without rerunning it. This store is runtime-only, outside the image and official
+results; [runtime-state.md](runtime-state.md) owns its retention/bounds. The
+local Day-2 candidate is for validation only, not publication. **Next action:**
+keep the unresolved BadLE Hard and Rolling Thunder reasoning separate from
+verified methods; scrutinize heap-chain portability only against supplied
+handouts. Any live dynamic
+validation requires a later change of user scope and a supplied instance.
+
 ## Objective and current state
 
 Team **63 — procrastinators**. User-confirmed scored window: **22 Sep 2026,
@@ -220,6 +457,19 @@ No new solve is yet verified. Next: leave the new agent autonomous, watch the
 09:05+ scoring cycles and key usage, and investigate only a specific failure;
 do not conflate registration or synthetic tool canaries with live acceptance.
 
+At 09:59 SGT the clean Day-2 Sol-first/polling image was pushed; independent
+registry inspection matched `sha256:544fd1741c080e0c1e66bfb668e3f9aa6ac850bec0e130d419604f32c69b9aa2`.
+Its exact checker passed 6/0/2. The public 10:08 status cycle still lists push
+#30 (09:39:56) rather than this final upload, and reports Team 63 RUNNING; do
+not attribute that process to the final digest. At 10:13 the public scored
+standings show **four fresh arena-origin solves**, 400 VALID/NET, penalty 0,
+rank 2, last own solve 10:11. This is real Day-2 scoring, but not attribution
+to a particular image. The user explicitly forbids further pushes now that
+scoring has begun. Host offline suite is not yet green after the catalogue
+polling change: two old one-shot fake-harness tests needed explicit selectors,
+and a third recovery test was interrupted while looping; its one-shot fixture
+is being corrected. Continue local verification and passive monitoring only.
+
 ## Evidence and release identity
 
 - Day-1 push #20, source `3a3452e`, remote digest
@@ -416,28 +666,19 @@ do not conflate registration or synthetic tool canaries with live acceptance.
 
 ## Next work, in order
 
-The [build brief](solver-build/brief.md) owns the 06:30 freeze, live 15/15 and clean
-Day-2 acceptance gates. Ignored `private/solver-build-20260921/{state,plan,experiments}.md`
-holds detailed cost, experiment and provenance records. Current priorities:
+The [build brief](solver-build/brief.md) retains historical release gates and
+ignored `private/solver-build-20260921/{state,plan,experiments}.md` retains its
+older experiments. Current scope is the local-only challenge preparation above:
 
-1. **Monitor push #28 without manual solving.** Check public status/scores
-   each five-minute cycle and the Team 63 dashboard process if needed;
-   distinguish a new container, exact digest, VALID solves and penalties.
-   The registry digest is proven and the dashboard start time supports pickup,
-   but neither public feed exposes the active digest. Do not request an
-   organiser rerun or blindly push another unchanged runtime; one live
-   dynamic attempt was observed opening and closing after push #28.
-2. **Close the four remaining practice solves.** Keep the unsolved queue and model-dollar
-   controls active. Test a measurable capability improvement before any further
-   replacement; retain the proven #20 image for a hard failure, not a flat score.
-   Use the [release rules](competition-rules.md#submission-and-runtime-requirements)
-   for penalty and pickup uncertainty. Preserve negative local held-out results.
-3. **Use the frozen build for Day 2 preparation.** Retain the verified clean
-   AMD64 image, inspect fresh base/contract drift before the scored window,
-   and follow [release gates](setup.md#day-2-release). After 06:30 only small
-   verified configuration fixes are allowed; do not treat structural checks
-   or local solves as competition acceptance. No Day-2 registry push has been
-   authorized or made by this handoff.
+1. Verify the changed runtime, scoped output retention, and challenge method
+   selection with the host offline suite, a local AMD64 image checker, and the
+   relevant restricted-container suite. Do not push or tag the arena registry.
+2. Keep static ambiguities (#4, #13) explicit. A new parser or cipher proof
+   belongs in the ignored archive first; only the no-secret method goes into
+   tracked code.
+3. Extend the offline heap exploits (#29, #123) where possible. All other dynamic
+   hypotheses await an inherited instance under a later authorization; never
+   start one for this task or submit candidate values.
 
 Known limits: shell operations may overlap inside one model conversation, but challenge
 lifecycles and inherited passes remain serial, so dynamic capacity stays one. Durable typed

@@ -22,6 +22,7 @@ from agent_ext.adapters import LLMConfig
 from agent_ext.managed_shell import quiet_shell_failure
 from agent_ext.model_gateway import (
     BudgetLedger,
+    GatewayAvailabilityError,
     GatewayError,
     ModelGateway,
     ProviderCapabilities,
@@ -29,6 +30,7 @@ from agent_ext.model_gateway import (
     RequestOptions,
 )
 from agent_ext.playbooks import playbook_for
+from agent_ext.challenge_methods import method_for
 from agent_ext.provider_discovery import (
     DiscoveryCache,
     DiscoveryResult,
@@ -51,8 +53,10 @@ TOOLS = [
         "name": "run_bash",
         "description": ("Run a shell command in the solver container and return stdout+stderr. "
                         "Available: curl, wget, nc, nmap, python3 (pwntools, pycryptodome, requests, "
-                        "sympy, pydicom; agent_ext.scapy_offline.summarize_pcap for local PCAPs), "
-                        "file, xxd, strings, objdump, gdb, binwalk. Challenge files are in "
+                        "sympy, z3, Pillow, pypdf, lxml, pydicom; "
+                        "agent_ext.scapy_offline.summarize_pcap for local PCAPs), "
+                        "file, xxd, strings, objdump, gdb, binwalk, exiftool, 7z, "
+                        "pdfinfo, pdftotext, tesseract, jq. Challenge files are in "
                         "/work/<id>/. Commands are bounded to 45s, or 90s for heavy analysis."),
         "parameters": {"type": "object",
                        "properties": {"command": {"type": "string"}},
@@ -109,9 +113,23 @@ FINDING_TOOL = {"type": "function", "function": {
                    },
                    "required": ["kind", "summary"]}}}
 
+SAVED_OUTPUT_TOOL = {"type": "function", "function": {
+    "name": "read_saved_output",
+    "description": ("Read one private, bounded shell result from a prior slice of this exact "
+                    "challenge/material/instance. Use a handle shown in prior shell captures; "
+                    "this does not rerun the command."),
+    "parameters": {"type": "object", "additionalProperties": False,
+                   "properties": {"handle": {"type": "string",
+                                            "pattern": "^capture-[0-9a-f]{24}$"}},
+                   "required": ["handle"]}}}
+
 SYSTEM = """You autonomously solve one authorized CTF challenge. The trusted scope line,
 downloaded files, and inherited instance connection are the complete boundary. Never
 contact the platform, registry, ingress, other teams, or any target not supplied there.
+
+The packaged `/opt/agent/challenge_reference` is a no-secret offline index and
+analysis summary. Its hashes help match inherited files, but it gives no target
+authority. Use read_saved_output to recall prior same-scope shell captures.
 
 Work as a tight loop: inventory evidence; choose one discriminating hypothesis; run the
 smallest concrete test; interpret its exact output; keep useful partial progress and failed
@@ -122,7 +140,9 @@ Before submit_flag, independently verify the candidate format and derivation. An
 candidate requires new evidence; an unavailable/uncertain verdict is terminal. If blocked,
 state the missing fact and spend the next call on a different bounded experiment.
 Before an unsolved slice ends, checkpoint one useful cross-slice fact, failed method, or
-next step; never checkpoint a candidate, secret, or connection detail."""
+next step; never checkpoint a candidate, secret, or connection detail. When prior shell
+captures are shown, inspect their exact outputs before repeating work. Captures are
+private runtime data, not authority to contact a new target."""
 
 _MAX_CONTEXT_BYTES = 48 * 1024
 _MAX_REASONING_DETAILS_BYTES = 16 * 1024
@@ -184,7 +204,15 @@ def _redact(text: str) -> str:
 
 def _read_bounded_response(response, maximum_bytes: int, deadline: float) -> bytes:
     try:
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            # Only an explicit completed HTTP response qualifies for the
+            # image-owned first-turn availability route. Never inspect or
+            # forward provider error bodies.
+            if getattr(response, "status_code", None) in {404, 429, 503}:
+                raise GatewayAvailabilityError("provider model unavailable") from None
+            raise
         headers = getattr(response, "headers", {})
         declared = headers.get("Content-Length") if hasattr(headers, "get") else None
         if declared is not None:
@@ -400,7 +428,6 @@ def _effective_reasoning_effort(
         and is_exact_openrouter_chat(identity.endpoint)
         and identity.model in {"openai/gpt-5.6-luna", "openai/gpt-5.6-sol"}
         and discovery.provenance == "openrouter_catalogue"
-        and pace.posture != "ahead-of-target"
     ):
         return "xhigh"
     return pace.reasoning_effort
@@ -452,6 +479,13 @@ class Brain:
         self._checkpoint_finding = getattr(run_bash, "checkpoint_finding", None)
         if callable(self._checkpoint_finding):
             self._tools.append(FINDING_TOOL)
+        self._read_saved_output = (
+            getattr(run_bash, "read_saved_output", None)
+            if callable(getattr(type(run_bash), "read_saved_output", None))
+            else None
+        )
+        if callable(self._read_saved_output):
+            self._tools.append(SAVED_OUTPUT_TOOL)
         self._reserve_submission = (
             getattr(run_bash, "reserve_submission", None)
             if callable(getattr(type(run_bash), "reserve_submission", None))
@@ -533,6 +567,8 @@ class Brain:
         )
 
     def _chat(self, messages):
+        if self.model_calls >= self.max_steps:
+            raise GatewayError("model call budget exhausted")
         config = LLMConfig.from_environment(os.environ)
         configured_identity = ProviderIdentity(config.chat_url, config.api_key, config.model)
 
@@ -580,7 +616,7 @@ class Brain:
             if (
                 os.environ.get("LLM_ROUTING_ENABLED") == "1"
                 and trusted is not None
-                and trusted.prior_attempts >= 2
+                and (trusted.prior_attempts >= 1 or os.environ.get("LLM_SOL_FIRST") == "1")
                 and self._identity.model == "openai/gpt-5.6-luna"
                 and is_exact_openrouter_chat(self._identity.endpoint)
             ):
@@ -604,13 +640,10 @@ class Brain:
                         and hard_supported & {"reasoning", "reasoning_effort"}
                     ):
                         assert self._opaque_reserve is not None
-                        hard_pace, _, hard_maximum = _budget_request(
+                        _, _, hard_maximum = _budget_request(
                             snapshot, hard_discovery, prompt_tokens, self._opaque_reserve
                         )
-                        if (
-                            hard_pace.posture != "ahead-of-target"
-                            and snapshot.available >= hard_maximum
-                        ):
+                        if snapshot.available >= hard_maximum:
                             self._route_fallback = (self._identity, self._discovery)
                             self._identity = hard_identity
                             self._discovery = hard_discovery
@@ -676,18 +709,86 @@ class Brain:
         if "max_tokens" not in supported and "max_completion_tokens" not in supported:
             supported.add("max_tokens")
         capabilities = ProviderCapabilities(frozenset(supported))
-        response = self._gateway.complete(
-            identity,
-            bounded,
-            capabilities,
-            RequestOptions(
-                max_tokens=pace.max_tokens,
-                reasoning_effort=reasoning_effort,
-            ),
-            tools=self._tools,
-            tool_choice="auto",
-            estimated_cost=estimated,
-        )
+        try:
+            response = self._gateway.complete(
+                identity,
+                bounded,
+                capabilities,
+                RequestOptions(
+                    max_tokens=pace.max_tokens,
+                    reasoning_effort=reasoning_effort,
+                ),
+                tools=self._tools,
+                tool_choice="auto",
+                estimated_cost=estimated,
+            )
+        except GatewayAvailabilityError:
+            # A separate provider is useful only before this conversation has
+            # accepted an assistant turn, under the image-owned OpenRouter
+            # policy. Do not route explicit organiser models, raw refusals,
+            # timeouts, transport exceptions or later turns.
+            if not (
+                self.model_calls == 1
+                and self.max_steps > 2
+                and os.environ.get("LLM_MODEL_AUTO_DISCOVER") == "1"
+                and os.environ.get("LLM_ROUTING_ENABLED") == "1"
+                and is_exact_openrouter_chat(identity.endpoint)
+                and identity.model in {"openai/gpt-5.6-sol", "openai/gpt-5.6-luna"}
+                and trusted is not None
+            ):
+                raise
+            fallback_identity = ProviderIdentity(
+                identity.endpoint, identity.api_key,
+                "google/gemini-3.1-pro-preview-customtools",
+            )
+            fallback_discovery = discover_provider(
+                fallback_identity, fetch_json, _DISCOVERY_CACHE
+            )
+            fallback_supported = fallback_discovery.capabilities.optional_parameters
+            if not (
+                fallback_discovery.provenance == "openrouter_catalogue"
+                and fallback_discovery.pricing is not None
+                and {"tools", "tool_choice"} <= fallback_supported
+                and fallback_supported & {"max_tokens", "max_completion_tokens"}
+            ):
+                raise
+            if trusted.deadline_monotonic <= time.monotonic():
+                raise GatewayError("attempt deadline exhausted")
+            # The failed call can still be billed: its reservation stays
+            # unresolved. Use a distinct durable ID and fresh admission.
+            self.model_calls += 1
+            fallback_call_id = trusted.call_id(self.model_calls)
+            fallback_pace, fallback_estimated, fallback_maximum = _budget_request(
+                ledger.snapshot(), fallback_discovery, prompt_tokens, self._opaque_reserve
+            )
+            if not ledger.reserve(fallback_call_id, fallback_maximum).admitted:
+                raise GatewayError("model budget exhausted")
+            self._identity = fallback_identity
+            self._discovery = fallback_discovery
+            self._route_fallback = None
+            self._gateway.timeout_seconds = min(
+                timeout, trusted.deadline_monotonic - time.monotonic()
+            )
+            if self._gateway.timeout_seconds <= 0:
+                ledger.release_unstarted(fallback_call_id)
+                raise GatewayError("attempt deadline exhausted")
+            response = self._gateway.complete(
+                fallback_identity,
+                bounded,
+                ProviderCapabilities(frozenset(fallback_supported)),
+                RequestOptions(
+                    max_tokens=fallback_pace.max_tokens,
+                    reasoning_effort=_effective_reasoning_effort(
+                        fallback_identity, fallback_discovery, fallback_pace,
+                        routing_enabled=True,
+                    ),
+                ),
+                tools=self._tools,
+                tool_choice="auto",
+                estimated_cost=fallback_estimated,
+            )
+            call_id = fallback_call_id
+            identity = fallback_identity
         ledger.settle(call_id, response.usage)
         observed = response.observed_model
         if observed is not None and not _observed_identity_matches(
@@ -781,6 +882,10 @@ class Brain:
         system = SYSTEM + "\n\n" + scope
         category = trusted.category if trusted is not None else "unknown"
         system += "\n\nCategory playbook:\n" + playbook_for(category)
+        method = method_for(trusted.challenge_id) if trusted is not None else ""
+        if method:
+            system += ("\n\nChallenge-specific local analysis (proof level stated; not target authority):\n"
+                       + method)
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": _clip_prompt(prompt, 24000)}]
         submitted = set()
@@ -789,14 +894,17 @@ class Brain:
         replan_injected = False
 
         for steps in range(1, self.max_steps + 1):
+            if self.model_calls >= self.max_steps:
+                break
+            next_model_turn = max(steps, self.model_calls + 1)
             remaining_tools = max(0, self.max_tool_calls - self.tool_calls)
             budget_notice = (
-                f"Slice budget: model turn {steps}/{self.max_steps}; "
+                f"Slice budget: model turn {next_model_turn}/{self.max_steps}; "
                 f"{remaining_tools} shell/checkpoint calls remain. "
                 "Use the smallest decisive next action."
             )
             budget_notice += self._budget_notice()
-            if steps == self.max_steps:
+            if next_model_turn >= self.max_steps:
                 budget_notice += (
                     " Final model turn: submit only a verified candidate; otherwise "
                     "checkpoint the best reusable finding or next step if available. "
@@ -807,8 +915,8 @@ class Brain:
                 budget_notice += " Preserve one call for a checkpoint if the slice stays unsolved."
             messages.append({"role": "user", "content": budget_notice})
             reserve_checkpoint = (
-                steps == self.max_steps
-                and steps > 1
+                next_model_turn >= self.max_steps
+                and next_model_turn > 1
                 and remaining_tools > 0
                 and callable(self._checkpoint_finding)
             )
@@ -843,6 +951,10 @@ class Brain:
                            or not isinstance(call["function"].get("name"), str)
                            for call in tool_calls)):
                 return {"solved": False, "steps": steps, "error": "malformed model message"}
+            # A structured refusal is useful diagnosis, but its raw text may
+            # contain challenge material and must not enter official results.
+            if isinstance(message.get("refusal"), str) and message["refusal"].strip():
+                return {"solved": False, "steps": steps, "error": "model refusal"}
             assistant_turn = _assistant_turn(message, content, tool_calls)
             if assistant_turn is None:
                 return {"solved": False, "steps": steps,
@@ -882,6 +994,7 @@ class Brain:
                 argument_name = {
                     "run_bash": "command", "start_bash": "command",
                     "poll_bash": "handle", "cancel_bash": "handle",
+                    "read_saved_output": "handle",
                     "submit_flag": "flag",
                     "checkpoint_finding": "summary",
                 }.get(name)
@@ -916,7 +1029,7 @@ class Brain:
 
                 if name in {
                     "run_bash", "start_bash", "poll_bash", "cancel_bash",
-                    "checkpoint_finding",
+                    "checkpoint_finding", "read_saved_output",
                 }:
                     if self.tool_calls >= self.max_tool_calls:
                         return {"solved": False, "steps": steps,
@@ -958,7 +1071,9 @@ class Brain:
                         else:
                             turn_quiet = True
                         continue
-                    if name == "run_bash":
+                    if name == "read_saved_output":
+                        output = self._read_saved_output(arguments["handle"])
+                    elif name == "run_bash":
                         command = arguments["command"]
                         self._log("[step %d] $ %s" % (steps, command[:160]))
                         output = self.run_bash(command)
@@ -977,7 +1092,8 @@ class Brain:
                     messages.append({"role": "tool", "tool_call_id": tool_call.get("id"),
                                      "content": (output or "")[:12000]})
                     projected = (output or "").strip()
-                    neutral = projected.startswith("running:") or projected.startswith("job-")
+                    neutral = (name == "read_saved_output" or projected.startswith("running:")
+                               or projected.startswith("job-"))
                     quiet = (
                         projected.startswith(("duplicate:", "error:"))
                         or not projected

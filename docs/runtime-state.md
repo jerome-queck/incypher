@@ -5,6 +5,19 @@ only trusted numeric challenge IDs, material/instance hashes, enums, bounded cou
 timestamps, SHA-256 fingerprints, and sanitized summaries. Raw commands, output,
 connections, credentials and candidate flags are not persisted.
 
+`agent_ext.output_vault` is a separate private runtime store for shell continuation.
+It saves up to 16 bounded command/result pairs per exact material/instance scope and
+256 globally in `/work/command-output.sqlite3` (mode 0600). Each result is capped at
+64 KiB with an explicit truncation marker; oversize commands are not archived. Later
+slices see four short previews and may request one stored capture by opaque handle; the command is not
+re-executed. Captures may contain secrets or flags: keep the volume private, never
+include it in an image, result, log, or Git. A new dynamic instance gets a new scope;
+old captures are not projected into it. The store is local to the writable `/work`
+volume and does not promise survival across a fresh arena container/volume.
+Across dynamic generations only screened typed semantic findings with the same
+challenge/material hash can reappear, explicitly marked for re-verification.
+Raw captures and connection-specific evidence stay bound to the exact generation.
+
 ## Integration API
 
 - `rank_briefs(inherited_briefs)` adapts trusted mapping/object briefs and returns the
@@ -13,8 +26,14 @@ connections, credentials and candidate flags are not persisted.
 - For typed use, build a `ChallengeBrief` for each inherited trusted brief. Dynamic briefs require an
   instance-generation hash; static briefs reject one.
 - `RuntimeState.rank(briefs, now=...)` returns deterministic `RankedChallenge` values.
-  Ordering is unsolved, eligible, fewest attempts, crowd popularity, progress, lowest
-  points, static/dynamic, age, then the unchanged numeric challenge ID. The adapter
+  Ordering is unsolved and eligible first, then a due proven static revisit,
+  fresh proven static, due proven dynamic revisit, fresh proven dynamic,
+  unknown fresh static, unknown fresh dynamic, and ordinary retries. A one-miss
+  proven revisit becomes due
+  once three other briefs complete since its attempt; a second miss removes the
+  early promotion. Within a lane,
+  attempt depth, crowd popularity, progress, lowest points, dynamic at ties, age,
+  then the unchanged numeric challenge ID. The adapter
   accepts only nonnegative exact-integer catalogue `solves` or `solve_count`; absent or
   malformed values contribute zero. Crowd count is a capped ordinal tie-break, not a
   points bonus; counts above five are equivalent. Attempt rounds prevent monopolization; recent public solves and low points
@@ -39,6 +58,9 @@ connections, credentials and candidate flags are not persisted.
 - `project(scope)` returns newline-delimited JSON for Brain: newest applicable records,
   at most 16 and at most 8 KiB. Static evidence requires the same material hash;
   dynamic evidence additionally requires the same instance-generation hash.
+- `project_invariant_findings(ctx)` separately revalidates bounded typed findings
+  from prior dynamic generations with the same material. It never projects command
+  summaries or captures, and excludes current connection/redaction values.
 - `scope_key(ctx)` derives a key directly from trusted `AttemptContext` fields.
   `lookup`/`lookup_command`, `record`, and `project`/`project_memory` accept either that
   context or `Scope`.

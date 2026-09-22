@@ -59,3 +59,43 @@ class OfflineAnalysisToolTests(unittest.TestCase):
         stream.seek(0)
         from pydicom import dcmread
         self.assertEqual(str(dcmread(stream).PatientName), "Synthetic")
+
+    @unittest.skipUnless(importlib.util.find_spec("PIL"), "image-only Pillow wheel")
+    def test_image_pixels_round_trip(self):
+        from PIL import Image
+
+        image = Image.new("RGB", (2, 1))
+        image.putpixel((0, 0), (17, 42, 99))
+        stream = io.BytesIO()
+        image.save(stream, format="PNG")
+        stream.seek(0)
+        with Image.open(stream) as decoded:
+            self.assertEqual(decoded.getpixel((0, 0)), (17, 42, 99))
+
+    @unittest.skipUnless(importlib.util.find_spec("pypdf"), "image-only pypdf wheel")
+    def test_pdf_text_round_trip(self):
+        from pypdf import PdfReader, PdfWriter
+
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        stream = io.BytesIO()
+        writer.write(stream)
+        stream.seek(0)
+        self.assertEqual(len(PdfReader(stream).pages), 1)
+
+    @unittest.skipUnless(importlib.util.find_spec("z3"), "image-only Z3 wheel")
+    def test_constraint_solver_canary(self):
+        from z3 import Int, Solver, sat
+
+        value = Int("value")
+        solver = Solver()
+        solver.add(value * 7 + 3 == 38)
+        self.assertEqual(solver.check(), sat)
+        self.assertEqual(solver.model()[value].as_long(), 5)
+
+    @unittest.skipUnless(importlib.util.find_spec("lxml"), "image-only lxml wheel")
+    def test_markup_parser_canary(self):
+        from lxml import html
+
+        root = html.fromstring('<div data-name="synthetic"><span>ok</span></div>')
+        self.assertEqual(root.xpath("//div/@data-name"), ["synthetic"])
