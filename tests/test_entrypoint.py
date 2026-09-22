@@ -11,7 +11,7 @@ ENTRYPOINT = ROOT / "entrypoint.sh"
 
 
 class EntrypointEnvironmentTests(unittest.TestCase):
-    def run_entrypoint(self, runtime=None):
+    def run_entrypoint(self, runtime=None, *, capture_routing=False):
         runtime = runtime or {}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -27,6 +27,10 @@ class EntrypointEnvironmentTests(unittest.TestCase):
             fake_python = bin_dir / "python"
             fake_python.write_text(
                 "#!/bin/sh\n"
+                "if [ \"${CAPTURE_ROUTING-}\" = 1 ]; then\n"
+                "    printf '%s\\n' \"${LLM_ROUTING_ENABLED-}\"\n"
+                "    exit 0\n"
+                "fi\n"
                 "printf '%s|%s|%s|%s\\n' \"${LLM_BASE_URL-}\" \"${LLM_MODEL-}\" "
                 "\"${LLM_API_KEY-}\" \"${LLM_MODEL_AUTO_DISCOVER-}\"\n",
                 encoding="utf-8",
@@ -37,6 +41,7 @@ class EntrypointEnvironmentTests(unittest.TestCase):
                 "PATH": str(bin_dir),
                 "DAY1_LLM_ENV_FILE": str(env_file),
                 "ARENA_DEFAULT_LLM_MODEL": "default-model",
+                "CAPTURE_ROUTING": "1" if capture_routing else "0",
                 **runtime,
             }
             result = subprocess.run(
@@ -47,6 +52,19 @@ class EntrypointEnvironmentTests(unittest.TestCase):
                 text=True,
             )
             return result.stdout.strip()
+
+    def test_routing_only_for_image_owned_model_policy(self):
+        self.assertEqual(self.run_entrypoint(capture_routing=True), "1")
+        self.assertEqual(self.run_entrypoint({
+            "LLM_BASE_URL": "https://runtime.example/v1",
+            "LLM_API_KEY": "runtime-key",
+        }, capture_routing=True), "1")
+        self.assertEqual(self.run_entrypoint({
+            "LLM_BASE_URL": "https://runtime.example/v1",
+            "LLM_MODEL": "runtime-model",
+            "LLM_API_KEY": "runtime-key",
+            "LLM_ROUTING_ENABLED": "1",
+        }, capture_routing=True), "")
 
     def test_day1_file_is_fallback_when_runtime_is_absent(self):
         self.assertEqual(

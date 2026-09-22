@@ -35,6 +35,7 @@ from agent_ext.provider_discovery import (
     discover_provider,
     discover_served_model,
     estimate_max_cost,
+    is_exact_openrouter_chat,
 )
 from agent_ext.runtime_context import (
     Finding,
@@ -378,6 +379,26 @@ def _observed_identity_matches(configured: str, observed: str, discovery) -> boo
     )
 
 
+def _effective_reasoning_effort(
+    identity: ProviderIdentity,
+    discovery: DiscoveryResult,
+    pace: BudgetPace,
+    *,
+    routing_enabled: bool,
+) -> str | None:
+    if not discovery.capabilities.optional_parameters & {"reasoning", "reasoning_effort"}:
+        return None
+    if (
+        routing_enabled
+        and is_exact_openrouter_chat(identity.endpoint)
+        and identity.model in {"openai/gpt-5.6-luna", "openai/gpt-5.6-sol"}
+        and discovery.provenance == "openrouter_catalogue"
+        and pace.posture != "ahead-of-target"
+    ):
+        return "xhigh"
+    return pace.reasoning_effort
+
+
 def _assistant_turn(message: dict, content: str, tool_calls: list) -> dict | None:
     turn = {"role": "assistant", "content": content}
     if tool_calls:
@@ -483,17 +504,17 @@ class Brain:
             return ""
         snapshot = self._ensure_ledger().snapshot()
         pace = _budget_pace(snapshot)
-        supported = (
-            set(self._discovery.capabilities.optional_parameters)
-            if self._discovery is not None
-            else set()
-        )
-        if self._discovery is None:
+        if self._discovery is None or self._identity is None:
             reasoning = f"reasoning target {pace.reasoning_effort}, capability pending"
-        elif supported & {"reasoning", "reasoning_effort"}:
-            reasoning = f"reasoning {pace.reasoning_effort}"
         else:
-            reasoning = "reasoning adjustment unsupported"
+            effort = _effective_reasoning_effort(
+                self._identity, self._discovery, pace,
+                routing_enabled=os.environ.get("LLM_ROUTING_ENABLED") == "1",
+            )
+            reasoning = (
+                f"reasoning {effort}" if effort is not None
+                else "reasoning adjustment unsupported"
+            )
         return (
             f" Durable model budget: ${snapshot.available:.2f} available of "
             f"${snapshot.limit:.2f}; ${snapshot.committed_cost:.2f} committed versus "
@@ -517,6 +538,8 @@ class Brain:
 
         ledger = self._ensure_ledger()
         snapshot = ledger.snapshot()
+        bounded = _bounded_messages(messages)
+        prompt_tokens = max(1, len(json.dumps(bounded, ensure_ascii=False).encode("utf-8")) // 4)
 
         def fetch_json(url, timeout_seconds, maximum_bytes):
             return _bounded_get(
@@ -534,11 +557,50 @@ class Brain:
                 )
                 if self._discovery.provenance != "compatible_catalogue":
                     raise GatewayError("served model discovery unavailable")
+                if is_exact_openrouter_chat(self._identity.endpoint):
+                    self._discovery = discover_provider(
+                        self._identity, fetch_json, _DISCOVERY_CACHE
+                    )
             else:
                 self._identity = configured_identity
                 self._discovery = discover_provider(
                     configured_identity, fetch_json, _DISCOVERY_CACHE
                 )
+            # Route only the image's OpenRouter/Luna policy, never an arbitrary
+            # organiser-injected model. A different model starts a new slice;
+            # reasoning state is never mixed inside one conversation.
+            if (
+                os.environ.get("LLM_ROUTING_ENABLED") == "1"
+                and trusted is not None
+                and trusted.prior_attempts >= 2
+                and self._identity.model == "openai/gpt-5.6-luna"
+                and is_exact_openrouter_chat(self._identity.endpoint)
+            ):
+                hard_model = os.environ.get("LLM_HARD_MODEL", "openai/gpt-5.6-sol")
+                if hard_model and hard_model != self._identity.model:
+                    hard_identity = ProviderIdentity(
+                        self._identity.endpoint, self._identity.api_key, hard_model
+                    )
+                    hard_discovery = discover_provider(
+                        hard_identity, fetch_json, _DISCOVERY_CACHE
+                    )
+                    hard_supported = hard_discovery.capabilities.optional_parameters
+                    if (
+                        hard_discovery.provenance == "openrouter_catalogue"
+                        and hard_discovery.pricing is not None
+                        and {"tools", "tool_choice"} <= hard_supported
+                        and hard_supported & {"reasoning", "reasoning_effort"}
+                    ):
+                        assert self._opaque_reserve is not None
+                        hard_pace, _, hard_maximum = _budget_request(
+                            snapshot, hard_discovery, prompt_tokens, self._opaque_reserve
+                        )
+                        if (
+                            hard_pace.posture != "ahead-of-target"
+                            and snapshot.available >= hard_maximum
+                        ):
+                            self._identity = hard_identity
+                            self._discovery = hard_discovery
         identity = self._identity
         assert self._discovery is not None
         supported = set(self._discovery.capabilities.optional_parameters)
@@ -571,16 +633,13 @@ class Brain:
             if trusted is not None
             else f"{self._standalone_attempt}:model:{self.model_calls}"
         )
-        bounded = _bounded_messages(messages)
-        prompt_tokens = max(1, len(json.dumps(bounded, ensure_ascii=False).encode("utf-8")) // 4)
         assert self._opaque_reserve is not None
         pace, estimated, maximum = _budget_request(
             snapshot, self._discovery, prompt_tokens, self._opaque_reserve
         )
-        reasoning_effort = (
-            pace.reasoning_effort
-            if supported & {"reasoning", "reasoning_effort"}
-            else None
+        reasoning_effort = _effective_reasoning_effort(
+            identity, self._discovery, pace,
+            routing_enabled=os.environ.get("LLM_ROUTING_ENABLED") == "1",
         )
         reservation = ledger.reserve(call_id, maximum)
         if not reservation.admitted:

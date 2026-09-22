@@ -16,12 +16,13 @@ REGISTRY = "registry.in-cypher.com:5001"
 MODEL_KEYS = ("LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY")
 DAY1_POLICY_KEYS = (
     "MODEL_BUDGET_USD", "MODEL_CALL_RESERVE_USD", "MODEL_BUDGET_WINDOW_SECONDS",
-    "MODEL_SPEND_PACING",
+    "MODEL_SPEND_PACING", "LLM_HARD_MODEL",
 )
 RUNTIME_KEYS = (
     "CTF_BASE", "CTF_TOKEN", *MODEL_KEYS,
     "MAX_STEPS", "MAX_TOOL_CALLS", "MAX_SUBMISSIONS",
     "MODEL_BUDGET_USD", "MODEL_CALL_RESERVE_USD", "MODEL_BUDGET_WINDOW_SECONDS",
+    "LLM_HARD_MODEL",
 )
 
 
@@ -52,7 +53,8 @@ def require(values, names):
 def day1_environment(values):
     require(values, (*MODEL_KEYS, "MODEL_BUDGET_USD"))
     names = [*MODEL_KEYS, *(
-        key for key in DAY1_POLICY_KEYS if values.get(key, "").strip()
+        key for key in DAY1_POLICY_KEYS
+        if values.get(key, "").strip() or (key == "LLM_HARD_MODEL" and key in values)
     )]
     return "".join(f"{key}={shlex.quote(values[key])}\n" for key in names)
 

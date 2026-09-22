@@ -229,6 +229,18 @@ class RuntimeStateTests(unittest.TestCase):
         ordered = self.store.rank_briefs(briefs, now=10.5)
         self.assertIs(ordered[-1], briefs[1])
 
+    def test_trusted_rank_exposes_prior_completed_slices(self):
+        brief = {"id": 7, "points": 100, "type": "standard"}
+        with self.assertRaises(RuntimeStateError):
+            self.store.challenge_attempts(7)
+        self.store.rank_briefs([brief], now=10)
+        self.assertEqual(self.store.challenge_attempts(7), 0)
+        self.store.record_challenge_outcome(7, False, 1, "unsolved", now=10)
+        self.store.rank_briefs([brief], now=11)
+        self.assertEqual(self.store.challenge_attempts(7), 1)
+        with self.assertRaises(RuntimeStateError):
+            self.store.challenge_attempts(99)
+
     def test_catalogue_crowd_solves_prioritize_likely_easy_work(self):
         briefs = [
             {"id": 1, "points": 100, "type": "standard", "solves": 1},

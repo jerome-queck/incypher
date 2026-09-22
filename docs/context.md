@@ -164,6 +164,24 @@ was gone and the agent was still using CPU. These read-only samples support
 an active, serial attempt/release lifecycle, not a solved challenge or exact
 image digest. The 06:45 public cycle stayed RUNNING at 11/15, 2,250 VALID,
 rank 3 and penalty 0. Do not interrupt the live instance on a flat score.
+At the 08:00 cycle, push #28 was still RUNNING at 11/15, 2,250 VALID,
+rank 4 and penalty 0; the last own credited solve remained 03:25. A public
+dashboard sample at 08:03 still showed the same Team 63 container start
+(06:15:05) and one attached dynamic environment opened at 08:02:43. The
+current-key aggregate OpenRouter usage was USD6.35921694/20 at 08:02,
+leaving USD13.64078306. This balance is not the running process's ledger,
+and the public board still does not expose its digest. Keep the live agent
+running, monitor score and budget, and consider only a measured, verified
+configuration fix after the 06:30 feature freeze; 15/15 remains unproven.
+At 08:05 the user explicitly reopened feature work to improve model quality
+before 10:00 and requested a checked Day-1 test release. A local candidate
+routes image-owned OpenRouter Luna slices at xhigh, then price-gated Sol after
+two prior unsolved slices; it does not increase challenge lifecycle concurrency
+or override explicit organiser models. Two content-free real API probes
+accepted xhigh/tool requests with exact Luna and Sol identities; this is
+compatibility, not solve quality. The earlier Rapido 15/15 run was Daybreak/Luna,
+not a fresh Sol 15/15 result. Keep push #28 running until a reviewed candidate
+image is ready; then account for current provider balance before replacement.
 
 ## Evidence and release identity
 

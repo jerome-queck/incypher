@@ -118,7 +118,7 @@ class DiscoveryCache:
         return f"DiscoveryCache(entries={len(self._entries)}, max_entries={self.max_entries})"
 
 
-def _is_exact_openrouter_chat(endpoint: str) -> bool:
+def is_exact_openrouter_chat(endpoint: str) -> bool:
     try:
         parsed = urlsplit(endpoint)
     except ValueError:
@@ -226,7 +226,7 @@ def discover_provider(
         raise ValueError("ProviderIdentity required")
     if not callable(fetch_json):
         raise ValueError("fetch_json must be callable")
-    if not _is_exact_openrouter_chat(identity.endpoint):
+    if not is_exact_openrouter_chat(identity.endpoint):
         return _OPAQUE
     if cache is not None:
         cached = cache.get(identity.model)

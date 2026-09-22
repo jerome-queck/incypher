@@ -39,6 +39,17 @@ class RuntimeContextTests(unittest.TestCase):
                 self.assertGreater(enriched.deadline_monotonic, 0)
         self.assertIsNone(current_attempt())
 
+    def test_prior_attempts_are_trusted_bounded_slice_metadata(self):
+        with trusted_attempt(self.challenge, prior_attempts=2) as initial:
+            self.assertEqual(initial.prior_attempts, 2)
+            with tempfile.TemporaryDirectory() as directory:
+                enriched = bind_prepared_material(self.challenge, directory, [], None)
+                self.assertEqual(enriched.prior_attempts, 2)
+        for invalid in (-1, True, "2", 1_000_001):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "prior attempts"):
+                with trusted_attempt(self.challenge, prior_attempts=invalid):
+                    pass
+
     def test_prose_cannot_replace_trusted_identity(self):
         with trusted_attempt(self.challenge):
             changed = dict(self.challenge, id=99)

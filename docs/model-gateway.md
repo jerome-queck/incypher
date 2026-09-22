@@ -8,12 +8,17 @@ ledger storage. The inherited harness still owns challenge lifecycle and officia
 Optional request fields are allow-listed by an explicit `ProviderCapabilities` value.
 The active Brain retains the inherited compatible endpoint's core tool fields and one
 legacy completion limit for opaque providers, but infers no reasoning or temperature.
-A provider known to
-support an OpenRouter-shaped `reasoning` field may receive `{"effort":"high"}`; a
-provider declaring `reasoning_effort` receives the scalar form. No substitution occurs
-for an explicit runtime model. The Day-2 image-default discovery policy may resolve a
-different catalogue-advertised model before the first request; that resolved identity is
-then exact. The gateway performs one finite-timeout transport call
+A provider known to support an OpenRouter-shaped `reasoning` field may receive
+`{"effort":"high"}` or, for the image-owned Luna/Sol route, verified `xhigh`;
+a provider declaring `reasoning_effort` receives the scalar form. An explicit
+organiser-injected runtime model is never routed. The Day-2 image-default
+discovery policy may resolve a different catalogue-advertised model before
+the first request; that resolved identity is then exact. The image-owned
+OpenRouter/Luna policy chooses Sol at a new slice after at least two trusted
+unsolved slices only when Sol's exact catalogue entry supports tools and
+reasoning, has known pricing, is not ahead of the spend target and its
+conservative reservation fits. Otherwise Luna remains selected. Each slice
+uses one model for all turns. The gateway performs one finite-timeout transport call
 and never automatically retries a paid request.
 
 The gateway enforces its own caller-return deadline with a daemon transport worker even
@@ -69,7 +74,8 @@ an instruction to spend the remaining balance. The reasoning field is sent
 only when exact-model discovery advertises `reasoning` or `reasoning_effort`. Local
 practice, validation and direct Brain use default to fixed high; only the arena wrapper
 enables adaptive pacing when no explicit mode was supplied. Pacing changes request
-intensity, never the configured model identity or durable dollar ceiling.
+intensity; the image-owned route above may also select a priced model between
+slices. It never changes the durable dollar ceiling.
 Each model-facing budget notice reports both the durable average spend per elapsed minute
 and the target rate; the posture compares cumulative projected spend with the target.
 

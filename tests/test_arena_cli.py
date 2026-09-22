@@ -51,6 +51,18 @@ class ArenaCommandTests(unittest.TestCase):
                 "LLM_API_KEY": "synthetic-model-secret",
             })
 
+    def test_day1_can_explicitly_disable_hard_model_without_leaking_platform_key(self):
+        rendered = arena.day1_environment({
+            "LLM_BASE_URL": "https://model.test/v1",
+            "LLM_MODEL": "test/model",
+            "LLM_API_KEY": "synthetic-model-secret",
+            "MODEL_BUDGET_USD": "12",
+            "LLM_HARD_MODEL": "",
+            "CTF_TOKEN": "platform-secret",
+        })
+        self.assertIn("LLM_HARD_MODEL=''", rendered)
+        self.assertNotIn("platform-secret", rendered)
+
     def test_practice_limits_and_credentials_are_passed_by_name(self):
         values = {key: 'synthetic-secret' for key in arena.RUNTIME_KEYS}
         values['UNRELATED_SECRET'] = 'unrelated'

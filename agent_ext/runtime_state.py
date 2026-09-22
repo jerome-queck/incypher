@@ -264,6 +264,7 @@ class RuntimeState:
         self._initialise_lock = threading.Lock()
         self._rank_scopes: dict[int, Scope] = {}
         self._rank_eligible: dict[int, bool] = {}
+        self._rank_attempts: dict[int, int] = {}
         self._initialise()
 
     def _connect(self) -> sqlite3.Connection:
@@ -588,7 +589,17 @@ class RuntimeState:
         self._rank_eligible = {
             item.brief.challenge_id: item.eligible for item in ranked
         }
+        self._rank_attempts = {
+            item.brief.challenge_id: item.attempts for item in ranked
+        }
         return [by_id[item.brief.challenge_id] for item in ranked]
+
+    def challenge_attempts(self, challenge_id: int) -> int:
+        """Return prior completed slices from the latest trusted catalogue rank."""
+        _challenge_id(challenge_id)
+        if challenge_id not in self._rank_attempts:
+            raise RuntimeStateError("challenge was not present in the trusted brief list")
+        return self._rank_attempts[challenge_id]
 
     def challenge_eligible(self, challenge_id: int) -> bool:
         _challenge_id(challenge_id)
