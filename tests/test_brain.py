@@ -607,7 +607,7 @@ class BrainTests(unittest.TestCase):
             "openrouter_catalogue", "openrouter_catalogue", None, 128000,
         )
         snapshot = SimpleNamespace(
-            limit=brain.Decimal("20"), committed_cost=brain.Decimal("1"),
+            limit=brain.Decimal("40"), committed_cost=brain.Decimal("1"),
             started_at=1000.0,
         )
         environment = {"MODEL_SPEND_PACING": "adaptive",
@@ -619,7 +619,7 @@ class BrainTests(unittest.TestCase):
             self.assertEqual((pace.posture, pace.reasoning_effort, pace.max_tokens),
                              ("behind-target", "high", 8192))
             self.assertEqual(estimate, brain.Decimal("0.8193"))
-            self.assertEqual(reservation, brain.Decimal("1.22895"))
+            self.assertEqual(reservation, brain.Decimal("2.4579"))
 
             for altered in (
                 replace(discovery, max_completion_tokens=None),
@@ -632,7 +632,7 @@ class BrainTests(unittest.TestCase):
                 )
             self.assertEqual(
                 brain._budget_request(SimpleNamespace(**{**snapshot.__dict__,
-                    "committed_cost": brain.Decimal("1.8")}),
+                    "committed_cost": brain.Decimal("3")}),
                                       discovery, 100, brain.Decimal("1"), now=4900.0
                                       )[0].max_tokens, 4096
             )

@@ -61,7 +61,14 @@ ledger still needs a cap no greater than the provider balance actually left.
 Brain uses [provider discovery](provider-discovery.md) for the exact OpenRouter catalogue;
 opaque providers retain the compatible tool fields but receive no inferred reasoning or
 temperature. Known catalogue prices provide conservative estimates; response usage wins
-when measured. The durable ledger defaults to `/work/model-budget.sqlite3`, an USD 85
+when measured. Exact OpenRouter catalogue calls reserve at 3× listed worst-case
+prompt/completion cost (other known prices at 1.5×) because a measured BYOK
+Sol route billed upstream at twice the catalogue list price. For a BYOK
+response, the ledger counts upstream inference cost plus any OpenRouter charge;
+`usage.cost=0` alone is not free inference. Missing upstream cost remains
+unresolved at the full reservation instead of settling zero or a lower list
+estimate. This bounds admission but cannot mathematically rule out one
+provider charge above its reservation. The durable ledger defaults to `/work/model-budget.sqlite3`, an USD 85
 admission ceiling and USD 1 opaque-price reservations, leaving USD 15 of the competition
 allowance unadmitted for recovery/verification. The ceiling cannot exceed USD 85; opaque
 reservations must remain USD 0.05–5. Optional environment tuning is bounded;

@@ -103,6 +103,33 @@ class RequestTests(unittest.TestCase):
         self.assertIsNone(malformed.usage.total_tokens)
         self.assertEqual(malformed.usage.cost_provenance, CostProvenance.UNKNOWN)
 
+    def test_byok_settlement_counts_upstream_spend_not_zero_router_charge(self):
+        base = {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+        response = normalize_response({**base, "usage": {
+            "is_byok": True, "cost": 0,
+            "cost_details": {"upstream_inference_cost": "0.00054"},
+        }}, estimated_cost="0.00027")
+        self.assertEqual(response.usage.cost, Decimal("0.00054"))
+        self.assertEqual(response.usage.cost_provenance, CostProvenance.MEASURED)
+
+        with_fee = normalize_response({**base, "usage": {
+            "is_byok": True, "cost": "0.00001",
+            "cost_details": {"upstream_inference_cost": "0.00054"},
+        }})
+        self.assertEqual(with_fee.usage.cost, Decimal("0.00055"))
+
+        missing_upstream = normalize_response({**base, "usage": {
+            "is_byok": True, "cost": 0,
+        }}, estimated_cost="0.00027")
+        self.assertIsNone(missing_upstream.usage.cost)
+        self.assertEqual(missing_upstream.usage.cost_provenance, CostProvenance.UNKNOWN)
+
+        free_non_byok = normalize_response({**base, "usage": {
+            "is_byok": False, "cost": 0,
+        }})
+        self.assertEqual(free_non_byok.usage.cost, Decimal(0))
+        self.assertEqual(free_non_byok.usage.cost_provenance, CostProvenance.MEASURED)
+
     def test_gateway_is_one_shot_and_redacts_provider_failures(self):
         calls = []
 

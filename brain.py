@@ -51,7 +51,8 @@ TOOLS = [
         "name": "run_bash",
         "description": ("Run a shell command in the solver container and return stdout+stderr. "
                         "Available: curl, wget, nc, nmap, python3 (pwntools, pycryptodome, requests, "
-                        "sympy), file, xxd, strings, objdump, gdb, binwalk. Challenge files are in "
+                        "sympy, pydicom; agent_ext.scapy_offline.summarize_pcap for local PCAPs), "
+                        "file, xxd, strings, objdump, gdb, binwalk. Challenge files are in "
                         "/work/<id>/. Commands are bounded to 45s, or 90s for heavy analysis."),
         "parameters": {"type": "object",
                        "properties": {"command": {"type": "string"}},
@@ -344,8 +345,14 @@ def _budget_request(
         estimate = estimate_max_cost(
             discovery.pricing, prompt_tokens=prompt_tokens, completion_tokens=cap
         )
+        # An OpenRouter key may route through BYOK: catalogue list price can
+        # be below upstream provider billing (2x in the measured Sol probe).
+        multiplier = (
+            Decimal("3") if discovery.provenance == "openrouter_catalogue"
+            else Decimal("1.5")
+        )
         maximum = (
-            max(Decimal("0.05"), estimate * Decimal("1.5"))
+            max(Decimal("0.05"), estimate * multiplier)
             if estimate is not None else opaque_reserve
         )
         return estimate, maximum

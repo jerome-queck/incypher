@@ -1,5 +1,9 @@
 FROM registry.in-cypher.com:5001/base/agent-base:latest
 
+COPY requirements-tools.txt /opt/agent/requirements-tools.txt
+RUN python3 -m pip install --no-cache-dir --no-deps \
+    -r /opt/agent/requirements-tools.txt
+
 COPY agent_ext /opt/agent/agent_ext
 COPY brain.py /opt/agent/brain.py
 COPY entrypoint.sh /opt/agent/entrypoint.sh

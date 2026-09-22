@@ -54,6 +54,14 @@ summaries, and rejects an exact same-scope replay. Static evidence requires the 
 hash; dynamic evidence also requires the same instance-generation hash. See
 [runtime-state.md](runtime-state.md).
 
+The image also packages hash-pinned `pydicom` for offline DICOM metadata and
+`scapy` for local capture analysis. Brain advertises
+`agent_ext.scapy_offline.summarize_pcap` through the existing supervised shell;
+that convenience wrapper reads at most 257 packets, reports at most 256 and
+previews at most 256 payload bytes per packet without interface discovery.
+It does not sniff or send traffic. These packages do not alter the trusted
+connection scope, tool-call limits or one-dynamic-instance lifecycle.
+
 ### Fixed inspections
 
 Workers use isolated Python, a minimal environment excluding credentials/startup hooks,

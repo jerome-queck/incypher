@@ -31,6 +31,9 @@ passes only allowlisted runtime names, including the budget controls above. A bu
 ledger preserves calls and start time across restarts. A lower ceiling may be applied
 to an existing ledger, but raising it is rejected; use a fresh work directory for a
 separate newly budgeted run. The solver does not query provider balance automatically.
+For OpenRouter BYOK, the key's displayed limit may exclude upstream provider
+charges; verify that separate account before release and use the
+[durable cost policy](model-gateway.md).
 Local `practice` forces fixed-high reasoning while retaining the configured `LLM_MODEL`.
 The image-owned [model route](model-gateway.md) uses the same ledger; an empty
 `LLM_HARD_MODEL` disables its Sol escalation.
